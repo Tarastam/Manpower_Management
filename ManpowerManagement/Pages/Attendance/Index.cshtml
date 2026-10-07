@@ -1,16 +1,55 @@
 @page
 @model ManpowerManagement.Pages.Attendance.IndexModel
+@using System.Globalization
+@using System.Text.Json
 @using ManpowerManagement.Models
+@using ManpowerManagement.Pages.Attendance
 @{
     ViewData["Title"] = "Attendance";
     var today = ManpowerManagement.Services.BusinessDateService.Current();
-    var firstDate = Model.Days.FirstOrDefault();
-    var lastDate = Model.Days.LastOrDefault();
+    var prevMonth = Model.MonthStart.AddMonths(-1).ToString("yyyy-MM");
+    var nextMonth = Model.MonthStart.AddMonths(1).ToString("yyyy-MM");
+    var leader = Model.Leader;
+    var gridData = new
+    {
+        today = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        month = Model.Month,
+        shift = Model.Shift,
+        standardHours = IndexModel.StandardHours,
+        maxWeeklyHours = IndexModel.MaxWeeklyHours,
+        workshopId = Model.WorkshopId ?? 0,
+        isAdmin = Model.IsAdmin,
+        canEditPast = true,
+        leaveCodes = IndexModel.LeaveCodes.ToDictionary(p => ((int)p.Key).ToString(), p => p.Value),
+        workshops = Model.WorkshopOptions.ToDictionary(o => o.Value, o => o.Text),
+        days = Model.Days.Select(d => new
+        {
+            date = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            day = d.Day,
+            dow = d.ToString("ddd", CultureInfo.InvariantCulture),
+            inMonth = d.Month == Model.MonthStart.Month,
+            off = Model.OffDays.Contains(d),
+            direct = Model.Manpower.TryGetValue(d, out var m) && m.Keyed ? m.DirectCount : null,
+            indirect = Model.Manpower.TryGetValue(d, out var n) && n.Keyed ? n.IndirectCount : null,
+            ind = Model.Manpower.TryGetValue(d, out var b) && b.Keyed ? new[] { b.I1067, b.I841, b.I733 } : null,
+            // Closed days already counted by the daily summary.
+            counted = Model.Manpower.TryGetValue(d, out var c) && c.TotalHours.HasValue
+        }),
+        rows = Model.GridRows.Select(r => new
+        {
+            id = r.EmployeeId,
+            code = r.EmployeeCode,
+            name = r.EmployeeName,
+            process = r.Process,
+            leader = r.IsLeader,
+            cells = r.Cells.Select(c => new { h = c.WorkingHours, lt = (int)c.LeaveType, lh = c.LeaveHours, w = c.WorkshopId, rs = c.IsResigned })
+        })
+    };
 }
 
-<div class="attendance-page">
+<div class="attendance-page ag-page">
     <div class="attendance-heading">
-        <div><span class="attendance-eyebrow">WORKFORCE SCHEDULE</span><h1>Attendance calendar</h1><p>Review working hours, leave and transfers by employee and week.</p></div>
+        <div><span class="attendance-eyebrow">WORKFORCE SCHEDULE</span><h1>Attendance</h1><p>Every working day counts @IndexModel.StandardHours.ToString("0.00") hrs for everyone from the start of the day. Key only the exceptions, the same way as in the Excel sheet. Changes are saved automatically and written to the database at 07:00 and 19:00.</p></div>
     </div>
 
     <ul class="nav nav-tabs mb-3">
@@ -18,232 +57,175 @@
         <li class="nav-item"><a class="nav-link" asp-page="/Attendance/Pregnant">Pregnant</a></li>
     </ul>
 
-    <form class="attendance-filters" id="attendanceFilters" method="get">
-        <div><label class="form-label" for="workshop">Workshop</label><select id="workshop" class="form-select" asp-for="WorkshopId" asp-items="Model.WorkshopOptions"><option value="">Select workshop</option></select></div>
-        <div><label class="form-label" for="shift">Shift</label><select id="shift" class="form-select" asp-for="Shift" asp-items="Model.ShiftOptions"></select></div>
-        <div><label class="form-label" for="startMonth">From month</label><input id="startMonth" class="form-control" type="month" asp-for="StartMonth" /></div>
-        <div><label class="form-label" for="endMonth">To month <span class="small text-muted">(up to 3)</span></label><input id="endMonth" class="form-control" type="month" asp-for="EndMonth" /></div>
-        <div class="attendance-load"><button class="btn btn-primary w-100">Load calendar</button></div>
-    </form>
-
-    @if (!string.IsNullOrEmpty(Model.Error)) { <div class="alert alert-danger" role="alert">@Model.Error</div> }
-
-    @if (Model.GridRows.Any())
+    @if (leader is not null)
     {
-        <form method="post" id="attendanceForm">
-            <input type="hidden" asp-for="WorkshopId" /><input type="hidden" asp-for="Shift" /><input type="hidden" asp-for="StartMonth" /><input type="hidden" asp-for="EndMonth" /><input type="hidden" id="submitStartDateField" name="SubmitStartDate" value="" /><input type="hidden" id="submitEndDateField" name="SubmitEndDate" value="" />
-            <div class="attendance-toolbar">
-                <div class="attendance-search-actions">
-                    <div class="attendance-search">
-                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                        <label class="visually-hidden" for="attendanceSearch">Search employee</label><input id="attendanceSearch" type="search" placeholder="Search employee" autocomplete="off" />
-                    </div>
-                    <button class="btn attendance-today-button" id="attendanceToday" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 3v4M16 3v4M3 10h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Today</button>
-                    <a class="btn attendance-today-button" asp-page-handler="ExportCsv" asp-route-workshopId="@Model.WorkshopId" asp-route-shift="@Model.Shift" asp-route-startMonth="@Model.StartMonth" asp-route-endMonth="@Model.EndMonth">Export CSV</a>
-                </div>
-                <div class="attendance-legend" aria-label="Calendar color legend"><span><i class="legend-dot hours"></i>Custom hours</span><span class="leave-key"><i class="legend-dot leave-annual"></i>Annual</span><span class="leave-key"><i class="legend-dot leave-sick"></i>Sick</span><span class="leave-key"><i class="legend-dot leave-business"></i>Business</span><span class="leave-key"><i class="legend-dot leave-other"></i>Other</span><span class="leave-key"><i class="legend-dot leave-absent"></i>Absent</span><span class="leave-key"><i class="legend-dot leave-mother"></i>Mother</span><span><i class="legend-dot transfer"></i>Transfer</span><span><i class="legend-dot off"></i>OFF</span><span><i class="legend-dot today"></i>Today</span><span><i class="legend-dot confirmed"></i>Submitted</span><span><i class="legend-dot day-submitted"></i>Day fully submitted</span><span><i class="legend-dot day-partial"></i>Day partially submitted</span>@if (Model.LastSubmittedDay is DateOnly lastSubmitted) { <span class="attendance-last-submitted">Updated through <strong>@lastSubmitted.ToString("d MMM yyyy")</strong></span> }</div>
+        <div class="ag-scope" role="status">
+            <div class="ag-scope-main">
+                <span class="ag-scope-label">Entering attendance for</span>
+                @if (Model.CanSwitchShift)
+                {
+                    <form method="get" class="ag-scope-shift">
+                        <strong class="ag-scope-team">@leader.WorkshopName <span>·</span></strong>
+                        <input type="hidden" name="month" value="@Model.Month" />
+                        <label class="visually-hidden" for="scopeWorkshop">Workshop</label>
+                        <select id="scopeWorkshop" name="workshopId" class="form-select" data-nav-select onchange="this.form.shift.value = ''; this.form.requestSubmit()">
+                            @foreach (var w in Model.AllowedWorkshops) { <option value="@w.Value" selected="@(w.Value == Model.WorkshopId?.ToString())">@w.Text</option> }
+                        </select>
+                        <label class="visually-hidden" for="scopeShift">Shift</label>
+                        <select id="scopeShift" name="shift" class="form-select" data-nav-select onchange="this.form.requestSubmit()">
+                            @foreach (var s in Model.AllowedShifts) { <option value="@s" selected="@(s == Model.Shift)">Shift @s</option> }
+                        </select>
+                    </form>
+                    <span class="ag-scope-by">Keyed by @leader.Name (@leader.EmployeeCode) · all workshops and shifts in this line</span>
+                }
+                else
+                {
+                    <strong class="ag-scope-team">@leader.WorkshopName <span>·</span> Shift @Model.Shift</strong>
+                }
+                @if (!Model.CanSwitchShift) { <span class="ag-scope-by">Keyed by @leader.Name (@leader.EmployeeCode)</span> }
             </div>
-
-            <div class="attendance-grid-wrap" id="attendanceGridWrap" tabindex="0" aria-label="Attendance calendar table. Scroll horizontally to view all dates.">
-                <table class="attendance-grid">
-                    <thead>
-                        <tr>
-                            <th class="sticky-id" rowspan="2">Employee ID</th><th class="sticky-name" rowspan="2">Employee</th>
-                            @foreach (var week in Model.WeekGroups) { var sameMonth = week.Start.Month == week.End.Month; <th class="week-heading" colspan="@(week.Count + 1)">@(sameMonth ? $"{week.Start:MMM d} – {week.End:d}" : $"{week.Start:MMM d} – {week.End:MMM d}")</th> }
-                        </tr>
-                        <tr>
-                            @foreach (var week in Model.WeekGroups)
-                            {
-                                var hasSaturday = Enumerable.Range(week.StartIndex, week.Count).Any(index => Model.Days[index].DayOfWeek == DayOfWeek.Saturday);
-                                @for (var j = week.StartIndex; j < week.StartIndex + week.Count; j++) { var day = Model.Days[j]; var weekend = day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday; var addWeeklyTotal = day.DayOfWeek == DayOfWeek.Saturday || (j == week.StartIndex + week.Count - 1 && !hasSaturday); <th class="day-heading @(weekend ? "weekend" : "") @(day == today ? "is-today" : "") @(day > today ? "future" : day < today ? "past" : "") @(Model.SubmittedDays.Contains(day) ? "submitted" : Model.PartiallySubmittedDays.Contains(day) ? "partially-submitted" : "")" data-date="@day.ToString("yyyy-MM-dd")" tabindex="-1" title="@(Model.SubmittedDays.Contains(day) ? "Submitted" : Model.PartiallySubmittedDays.Contains(day) ? "Partially submitted" : "Not submitted")"><span>@day.Day</span><small>@day.ToString("ddd")</small></th>@if (addWeeklyTotal) { <th class="weekly-heading"><span>Σ</span><small>WEEK</small></th> } }
-                            }
-                        </tr>
-                    </thead>
-                    <tbody id="attendanceRows">
-                    @for (var i = 0; i < Model.GridRows.Count; i++)
-                    {
-                        var row = Model.GridRows[i];
-                        <tr data-row-index="@i">
-                            <td class="sticky-id">@row.EmployeeCode<input type="hidden" name="GridRows[@i].EmployeeId" value="@row.EmployeeId" /><input type="hidden" name="GridRows[@i].EmployeeCode" value="@row.EmployeeCode" /></td>
-                            <td class="sticky-name">@row.EmployeeName<input type="hidden" name="GridRows[@i].EmployeeName" value="@row.EmployeeName" /><input type="hidden" name="GridRows[@i].EmployeeShift" value="@row.EmployeeShift" /></td>
-                            @foreach (var week in Model.WeekGroups)
-                            {
-                                var hasSaturday = Enumerable.Range(week.StartIndex, week.Count).Any(index => Model.Days[index].DayOfWeek == DayOfWeek.Saturday);
-                                @for (var j = week.StartIndex; j < week.StartIndex + week.Count; j++)
-                                {
-                                    var cell = row.Cells[j]; var isFuture = cell.BusinessDate > today; var isToday = cell.BusinessDate == today; var addWeeklyTotal = cell.BusinessDate.DayOfWeek == DayOfWeek.Saturday || (j == week.StartIndex + week.Count - 1 && !hasSaturday); var leave = cell.LeaveType != LeaveType.None; var leaveClass = cell.LeaveType switch { LeaveType.AnnualLeave => "annual", LeaveType.SickLeave => "sick", LeaveType.BusinessLeave => "business", LeaveType.OtherLeave => "other", LeaveType.Absent => "absent", LeaveType.MotherLeave => "mother", _ => "" }; var transfer = !cell.IsOffDay && cell.WorkshopId != Model.WorkshopId; var customHours = !cell.IsOffDay && !leave && cell.WorkingHours != ManpowerManagement.Pages.Attendance.IndexModel.StandardHours; var state = cell.IsOffDay ? $"off {(cell.WorkingHours > 0 ? "has-ot" : "")}" : leave ? $"leave leave-{leaveClass}" : transfer ? "transfer" : customHours ? "hours" : "";
-                                    <td class="calendar-cell @(isFuture ? "future" : "past") @(isToday ? "is-today" : "") @state" data-date="@cell.BusinessDate.ToString("yyyy-MM-dd")" data-off="@cell.IsOffDay.ToString().ToLowerInvariant()" data-confirmed="@cell.IsConfirmed.ToString().ToLowerInvariant()" data-employee-id="@row.EmployeeId" data-original-hours="@cell.WorkingHours" data-original-workshop="@cell.WorkshopId" data-original-leave-type="@((int)cell.LeaveType)" data-original-leave-hours="@cell.LeaveHours">
-                                        <input type="hidden" class="cell-date" name="GridRows[@i].Cells[@j].BusinessDate" value="@cell.BusinessDate" /><input type="hidden" class="cell-hours" name="GridRows[@i].Cells[@j].WorkingHours" value="@cell.WorkingHours" /><input type="hidden" class="cell-workshop" name="GridRows[@i].Cells[@j].WorkshopId" value="@cell.WorkshopId" /><input type="hidden" class="cell-leave-type" name="GridRows[@i].Cells[@j].LeaveType" value="@((int)cell.LeaveType)" /><input type="hidden" class="cell-leave-hours" name="GridRows[@i].Cells[@j].LeaveHours" value="@cell.LeaveHours" />
-                                        <button type="button" class="day-button" data-bs-toggle="modal" data-bs-target="#attendanceModal" data-date="@cell.BusinessDate.ToString("yyyy-MM-dd")" aria-label="Edit @row.EmployeeName for @cell.BusinessDate.ToString("d MMMM yyyy")@(cell.IsOffDay ? " OFF day" : "")"><span class="cell-value">@(cell.IsOffDay ? cell.WorkingHours > 0 ? cell.WorkingHours.ToString("0.00") : "OFF" : leave ? cell.LeaveType.ToString().Replace("Leave", "") : cell.WorkingHours.ToString("0.00"))</span><span class="cell-note">@(cell.IsOffDay ? cell.WorkingHours > 0 ? "OT hrs" : "Tap for OT" : leave ? "leave" : transfer ? "transfer" : "hrs")</span></button>
-                                    </td>
-                                    @if (addWeeklyTotal) { var weeklyHours = row.Cells.Skip(week.StartIndex).Take(week.Count).Sum(c => c.WorkingHours); <td class="weekly-total @(weeklyHours > ManpowerManagement.Pages.Attendance.IndexModel.MaxWeeklyHours ? "over-limit" : "")" data-week-start-index="@week.StartIndex" data-week-count="@week.Count" tabindex="-1"><output>@weeklyHours.ToString("0.00")</output><small>hrs / 60 max</small></td> }
-                                }
-                            }
-                        </tr>
-                    }
-                    </tbody>
-                </table>
+            <div class="d-flex gap-2 flex-wrap">
+                <form method="post" asp-page="/Attendance/CheckIn" asp-page-handler="Lookup"><input type="hidden" name="EmployeeCode" value="@leader.EmployeeCode" /><button class="btn btn-light">Change workshop / shift</button></form>
+                <form method="post" asp-page="/Attendance/CheckIn" asp-page-handler="SignOut"><button class="btn btn-light">Change leader</button></form>
             </div>
-            <div class="attendance-grid-foot"><span>Showing @Model.GridRows.Count employee@(Model.GridRows.Count == 1 ? "" : "s")</span><span>Scroll horizontally to view more dates →</span></div>
-            <div id="attendanceClientError" class="alert alert-danger mt-3 mb-0" role="alert" tabindex="-1" hidden></div>
-            <div class="attendance-save"><span class="text-muted small">Edits are staged until you submit. @(Model.IsAdmin ? "Admins can confirm a date range." : "Select the date to confirm.") Submitting confirms every day in range, including unedited defaults. Working hours cannot be entered ahead of today, except leave.</span><button type="button" class="btn btn-success px-4" id="attendanceSubmit">Submit attendance</button></div>
+        </div>
+    }
+    else
+    {
+        <form class="ag-admin-filters" method="get">
+            <span class="ag-admin-badge">Admin</span>
+            <div><label class="form-label" for="workshop">Workshop</label><select id="workshop" class="form-select" asp-for="WorkshopId" asp-items="Model.WorkshopOptions" onchange="this.form.submit()"><option value="">Select workshop</option></select></div>
+            <div><label class="form-label" for="shift">Shift</label><select id="shift" class="form-select" asp-for="Shift" asp-items="Model.ShiftOptions" onchange="this.form.submit()"><option value="">Select shift</option></select></div>
+            <input type="hidden" asp-for="Month" />
+            <a class="btn btn-outline-secondary ms-auto" asp-page="/Attendance/CheckIn">Leader check-in</a>
         </form>
     }
-</div>
 
-<div class="modal fade" id="attendanceModal" tabindex="-1" aria-labelledby="attendanceModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-    <div class="modal-header"><div><h2 class="modal-title fs-5" id="attendanceModalTitle">Edit attendance</h2><p class="mb-0 small text-muted" id="modalContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-    <div class="modal-body">
-        <div class="mb-3"><label class="form-label" for="modalWorkshop">Workshop</label><select id="modalWorkshop" class="form-select" asp-items="Model.WorkshopOptions"></select></div>
-        <fieldset class="mb-3"><legend class="form-label">Attendance type</legend><div class="attendance-choice-grid"><label><input type="radio" name="modalMode" id="modeHours" value="hours" checked><span>Working hours</span></label><label><input type="radio" name="modalMode" id="modeLeave" value="leave"><span>Leave</span></label></div></fieldset>
-        <div id="hoursGroup"><label class="form-label" for="modalHours">Working hours</label><div class="input-group"><input id="modalHours" class="form-control" type="number" min="0" max="10.67" step="0.01" value="10.67" /><span class="input-group-text">hrs</span></div></div>
-        <div id="leaveGroup" hidden>
-            <div class="mb-3"><label class="form-label" for="modalLeaveType">Leave type</label><select class="form-select" id="modalLeaveType">@foreach (var item in Html.GetEnumSelectList<LeaveType>().Where(x => x.Value != ((int)LeaveType.None).ToString())) { <option value="@item.Value">@item.Text</option> }</select></div>
-            <fieldset class="mb-3" id="leaveDurationGroup"><legend class="form-label">Leave duration</legend><div class="attendance-choice-grid"><label><input type="radio" name="leaveDuration" id="leaveFullDay" value="full" checked><span>Full Day <small>10.67 hrs</small></span></label><label><input type="radio" name="leaveDuration" id="leavePeriod" value="period"><span>Period</span></label></div></fieldset>
-            <div class="period-group" id="periodGroup" hidden><div><label class="form-label" for="leaveStartTime">From</label><input class="form-control" id="leaveStartTime" type="time" value="08:00" /></div><div><label class="form-label" for="leaveEndTime">To</label><input class="form-control" id="leaveEndTime" type="time" value="12:00" /></div><div class="period-result" aria-live="polite"><span>Leave hours</span><strong id="calculatedLeaveHours">4.00 hrs</strong></div></div>
-            <div class="mother-range" id="motherRange" hidden><div><label class="form-label" for="motherStartDate">Start date</label><input class="form-control" id="motherStartDate" type="date" min="@firstDate.ToString("yyyy-MM-dd")" max="@lastDate.ToString("yyyy-MM-dd")" /></div><div><label class="form-label" for="motherEndDate">End date</label><input class="form-control" id="motherEndDate" type="date" min="@firstDate.ToString("yyyy-MM-dd")" max="@lastDate.ToString("yyyy-MM-dd")" /></div><p>Full-day Mother Leave will be applied to working days in this range. OFF days remain blank.</p></div>
+    @if (!string.IsNullOrEmpty(Model.Message)) { <div class="alert alert-success" role="status">@Model.Message</div> }
+    @if (!string.IsNullOrEmpty(Model.Error)) { <div class="alert alert-danger" role="alert">@Model.Error <span class="small">Your unsaved edits are still shown below.</span></div> }
+
+    @if (Model.HasScope)
+    {
+        <div class="ag-monthbar">
+            <a class="btn ag-icon-btn" asp-route-month="@prevMonth" asp-route-workshopId="@Model.WorkshopId" asp-route-shift="@(leader is null || Model.CanSwitchShift ? Model.Shift : null)" aria-label="Previous month" data-nav>◀</a>
+            <h2>@Model.MonthStart.ToString("MMMM yyyy")</h2>
+            <a class="btn ag-icon-btn" asp-route-month="@nextMonth" asp-route-workshopId="@Model.WorkshopId" asp-route-shift="@(leader is null || Model.CanSwitchShift ? Model.Shift : null)" aria-label="Next month" data-nav>▶</a>
+            <span class="ag-monthbar-meta">@Model.GridRows.Count employees · @Model.WorkshopName · Shift @Model.Shift </span>
+            <a class="btn ag-tool-btn ms-auto" asp-page-handler="ExportCsv" asp-route-month="@Model.Month" asp-route-workshopId="@Model.WorkshopId" asp-route-shift="@(leader is null || Model.CanSwitchShift ? Model.Shift : null)">Export CSV</a>
         </div>
-        <div id="modalConfirmedNotice" class="alert alert-info py-2 mt-3 mb-0 small" role="status" hidden>This day was already submitted. Saving here updates only this day and does not require the Submit attendance button.</div>
-        <div id="modalError" class="alert alert-danger py-2 mt-3 mb-0 small" role="alert" hidden></div>
-    </div>
-    <div class="modal-footer"><button type="button" class="btn btn-outline-danger me-auto" id="modalClearLeave" hidden>Cancel leave</button><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button><button type="button" class="btn btn-primary" id="modalApply">Save edit</button></div>
-</div></div></div>
 
-<div class="modal fade" id="weeklyLimitModal" tabindex="-1" aria-labelledby="weeklyLimitModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-    <div class="modal-header"><h2 class="modal-title fs-5 text-danger" id="weeklyLimitModalTitle">Not allowed</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-    <div class="modal-body"><p class="mb-0">Working Hours &gt; 60 Hours per Week</p></div>
-    <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button></div>
-</div></div></div>
-
-<div class="modal fade" id="confirmSubmitModal" tabindex="-1" aria-labelledby="confirmSubmitModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-    <div class="modal-header"><h2 class="modal-title fs-5" id="confirmSubmitModalTitle">Confirm submission</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-    <div class="modal-body">
-        @if (Model.IsAdmin)
+        @if (Model.GridRows.Any())
         {
-            <p>Confirm attendance for which date range? Every day in range will be submitted, including unedited defaults.</p>
-            <div class="d-flex gap-2">
-                <div class="flex-fill"><label class="form-label small" for="confirmSubmitStartDate">From</label><input type="date" class="form-control" id="confirmSubmitStartDate" min="@firstDate.ToString("yyyy-MM-dd")" max="@lastDate.ToString("yyyy-MM-dd")" /></div>
-                <div class="flex-fill"><label class="form-label small" for="confirmSubmitEndDate">To</label><input type="date" class="form-control" id="confirmSubmitEndDate" min="@firstDate.ToString("yyyy-MM-dd")" max="@lastDate.ToString("yyyy-MM-dd")" /></div>
+            <div class="ag-toolbar">
+                <div class="attendance-search">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    <label class="visually-hidden" for="agSearch">Search employee</label><input id="agSearch" type="search" placeholder="Search employee" autocomplete="off" />
+                </div>
+                <div class="ag-fill" role="group" aria-label="Fill selected cells">
+                    <span class="ag-fill-label">Fill selection:</span>
+                    <button type="button" class="ag-chip" data-fill="">@IndexModel.StandardHours.ToString("0.00")</button>
+                    @foreach (var code in IndexModel.LeaveCodes)
+                    {
+                        <button type="button" class="ag-chip lt-@((int)code.Key)" data-fill="@code.Value" title="@code.Key">@code.Value</button>
+                    }
+                    <button type="button" class="ag-chip" id="agTransfer" title="Record work in another workshop">Transfer…</button>
+                </div>
+                <button type="button" class="btn ag-tool-btn" id="agToday">Today</button>
             </div>
+
+            <details class="ag-help">
+                <summary>How to key attendance</summary>
+                <ul>
+                    <li><strong>Type into a cell</strong>: a number (e.g. <code>7.33</code>) for working hours. A leave code for a full day: <code>AL</code> Annual, <code>SL</code> Sick, <code>BL</code> Business, <code>OL</code> Other, <code>AB</code> Absent, <code>ML</code> Mother. A code plus hours for part of the day, e.g. <code>SL4</code> = 4 hrs sick leave, 6.67 hrs worked.</li>
+                    <li><strong>Move</strong> with the arrow keys, Tab or Enter. <strong>Delete</strong> resets a cell to @IndexModel.StandardHours.ToString("0.00") (or OFF). Drag or Shift+click to select several cells, then type and press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to fill them all.</li>
+                    <li><strong>Copy &amp; paste from Excel</strong>: select a cell and press <kbd>Ctrl</kbd>+<kbd>V</kbd>. Pasting one value into a selected range fills the whole range.</li>
+                    <li>OFF days (hatched) accept OT hours only. Future dates accept leave only, so leave can be keyed in advance. There is no Submit button: every change is saved as you type and copied to the database at 07:00 and 19:00.</li>
+                    <li>Click <strong>Indirect MP</strong> at the bottom of each day and enter the number of indirect people for each working-hour band (10.67 / 8.41 / 7.33). <strong>Direct</strong> = present − indirect, calculated automatically. The daily hour summary uses Total Hours − Indirect Hours for productivity.</li>
+                    <li>Employees marked <span class="ag-leader-tag">LDR</span> are on the Attendance Leader list. Their attendance hours are included in Total Hours and deducted as Indirect Hours in the daily summary.</li>
+                </ul>
+            </details>
+
+            <div class="ag-wrap" id="agWrap" tabindex="0" aria-label="Attendance grid. Use the arrow keys to move and type to edit.">
+                <table class="ag-grid" id="agGrid"></table>
+                <input id="agEditor" class="ag-editor" autocomplete="off" spellcheck="false" hidden />
+            </div>
+            <div class="ag-status" id="agStatus" aria-live="polite"></div>
+
+            @Html.AntiForgeryToken()
+            <div class="ag-submit">
+                <span class="ag-dirty" id="agDirty" role="status" aria-live="polite" hidden></span>
+                <span class="text-muted small">Saved changes are written to the database at 07:00 and 19:00. Until then they show here but not on the dashboard.</span>
+            </div>
+
+            @if (Model.IsAdmin && Model.Manpower.Any(x => x.Value.TotalHours.HasValue))
+            {
+                <section class="mt-4" aria-labelledby="dailyHoursTitle">
+                    <h3 class="h5" id="dailyHoursTitle">Daily working hours</h3>
+                    <p class="text-muted small">Direct Hours = Total Hours − Indirect Hours. Indirect starts from the hour-band counts and leader hours; correct the daily total here when actual hours differ.</p>
+                    <div class="table-responsive"><table class="table table-sm align-middle">
+                        <thead><tr><th>Date</th><th>Total Hours</th><th>Indirect Hours</th><th>Direct Hours</th><th>Source</th><th>Correction</th></tr></thead>
+                        <tbody>
+                        @foreach (var (day, summary) in Model.Manpower.Where(x => x.Value.TotalHours.HasValue).OrderBy(x => x.Key))
+                        {
+                            <tr>
+                                <td>@day.ToString("dd MMM yyyy")</td>
+                                <td>@summary.TotalHours?.ToString("N2")</td>
+                                <td>@summary.IndirectHours?.ToString("N2")</td>
+                                <td class="fw-semibold @(summary.DirectHours < 0 ? "text-danger" : "")">@summary.DirectHours?.ToString("N2")</td>
+                                <td>@(summary.IndirectHoursIsManual ? "Corrected" : "Calculated")</td>
+                                <td>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <form method="post" asp-page-handler="IndirectHours" class="d-flex gap-1">
+                                            <input type="hidden" name="WorkshopId" value="@Model.WorkshopId" /><input type="hidden" name="Shift" value="@Model.Shift" />
+                                            <input type="hidden" name="businessDate" value="@day.ToString("yyyy-MM-dd")" />
+                                            <input class="form-control form-control-sm" style="width:7rem" type="number" name="indirectHours" min="0" max="@summary.TotalHours" step="0.01" value="@summary.IndirectHours" aria-label="Indirect hours for @day.ToString("dd MMM yyyy")" required />
+                                            <button class="btn btn-outline-primary btn-sm">Save</button>
+                                        </form>
+                                        @if (summary.IndirectHoursIsManual)
+                                        {
+                                            <form method="post" asp-page-handler="ResetIndirectHours">
+                                                <input type="hidden" name="WorkshopId" value="@Model.WorkshopId" /><input type="hidden" name="Shift" value="@Model.Shift" />
+                                                <input type="hidden" name="businessDate" value="@day.ToString("yyyy-MM-dd")" />
+                                                <button class="btn btn-outline-secondary btn-sm">Reset</button>
+                                            </form>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table></div>
+                </section>
+            }
         }
         else
         {
-            <p>Confirm attendance for which date? The full day will be submitted, including unedited defaults.</p>
-            <label class="form-label visually-hidden" for="confirmSubmitStartDate">Date</label>
-            <input type="date" class="form-control" id="confirmSubmitStartDate" min="@firstDate.ToString("yyyy-MM-dd")" max="@lastDate.ToString("yyyy-MM-dd")" />
+            <div class="alert alert-warning">No active employees in @Model.WorkshopName, shift @Model.Shift.</div>
         }
-        <div id="confirmSubmitError" class="alert alert-danger py-2 mt-3 mb-0 small" role="alert" hidden></div>
+    }
+</div>
+
+<div class="modal fade" id="agTransferModal" tabindex="-1" aria-labelledby="agTransferTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><div><h2 class="modal-title fs-5" id="agTransferTitle">Transfer to another workshop</h2><p class="mb-0 small text-muted" id="agTransferContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body"><label class="form-label" for="agTransferWorkshop">Worked in</label><select id="agTransferWorkshop" class="form-select" asp-items="Model.WorkshopOptions"></select><p class="small text-muted mt-2 mb-0">The selected cells keep their hours and leave. Only the workshop the hours are counted in changes.</p></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="agTransferApply">Apply</button></div>
+</div></div></div>
+
+<div class="modal fade" id="agIndirectModal" tabindex="-1" aria-labelledby="agIndirectTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content">
+    <div class="modal-header"><div><h2 class="modal-title fs-5" id="agIndirectTitle">Indirect manpower</h2><p class="mb-0 small text-muted" id="agIndirectContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body">
+        <table class="table table-sm align-middle mb-2"><thead><tr><th>Working hours</th><th>Headcount</th></tr></thead><tbody>
+            <tr><td>10.67</td><td><input class="form-control form-control-sm ag-ind" data-b="0" inputmode="numeric" maxlength="4" aria-label="Headcount 10.67 hours" /></td></tr>
+            <tr><td>8.41</td><td><input class="form-control form-control-sm ag-ind" data-b="1" inputmode="numeric" maxlength="4" aria-label="Headcount 8.41 hours" /></td></tr>
+            <tr><td>7.33</td><td><input class="form-control form-control-sm ag-ind" data-b="2" inputmode="numeric" maxlength="4" aria-label="Headcount 7.33 hours" /></td></tr>
+        </tbody></table>
+        <div class="small" id="agIndirectCalc"></div>
+        <div id="agIndirectError" class="alert alert-danger py-2 mt-2 mb-0 small" hidden></div>
     </div>
-    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-success" id="confirmSubmitOk">Submit</button></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="agIndirectApply">Apply</button></div>
 </div></div></div>
 
 @section Scripts {
-<script>
-(() => {
-    const standardHours = 10.67, maxWeeklyHours = 60, noLeave = '@((int)LeaveType.None)', motherLeave = '@((int)LeaveType.MotherLeave)', selectedWorkshop = '@Model.WorkshopId', todayIso = '@today.ToString("yyyy-MM-dd")', isAdmin = @Model.IsAdmin.ToString().ToLowerInvariant();
-    let activeCell;
-    const byId = id => document.getElementById(id);
-
-    byId('attendanceSearch')?.addEventListener('input', event => { const query = event.target.value.trim().toLowerCase(); document.querySelectorAll('#attendanceRows tr').forEach(row => row.hidden = !row.textContent.toLowerCase().includes(query)); });
-    byId('attendanceToday')?.addEventListener('click', () => {
-        const header = document.querySelector(`.day-heading[data-date="${todayIso}"]`);
-        if (header) { const wrap = byId('attendanceGridWrap'); wrap.scrollTo({ left: Math.max(0, header.offsetLeft - 370), behavior: 'smooth' }); header.focus({ preventScroll: true }); return; }
-        const month = todayIso.slice(0, 7); byId('startMonth').value = month; byId('endMonth').value = month; byId('attendanceFilters').submit();
-    });
-
-    function minutesFromTime(value) { if (!/^\d{2}:\d{2}$/.test(value)) return NaN; const [hours, minutes] = value.split(':').map(Number); return hours * 60 + minutes; }
-    function timeFromMinutes(total) { const safe = Math.max(0, Math.min(1439, total)); return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`; }
-    function showModalError(message) { const error = byId('modalError'); error.textContent = message; error.hidden = false; }
-    function calculatePeriod(showError = false) { const hours = (minutesFromTime(byId('leaveEndTime').value) - minutesFromTime(byId('leaveStartTime').value)) / 60; const valid = Number.isFinite(hours) && hours > 0 && hours <= standardHours; byId('calculatedLeaveHours').textContent = valid ? `${hours.toFixed(2)} hrs` : '—'; if (showError && !valid) showModalError('Select a period longer than 0 and no more than 10.67 hours.'); return valid ? Number(hours.toFixed(2)) : NaN; }
-    function updateModalControls() { const isLeave = byId('modeLeave').checked, isMother = isLeave && byId('modalLeaveType').value === motherLeave, isPeriod = isLeave && !isMother && byId('leavePeriod').checked; byId('hoursGroup').hidden = isLeave; byId('leaveGroup').hidden = !isLeave; byId('leaveDurationGroup').hidden = isMother; byId('motherRange').hidden = !isMother; byId('periodGroup').hidden = !isPeriod; byId('modalError').hidden = true; if (isMother) byId('leaveFullDay').checked = true; if (isPeriod) calculatePeriod(); }
-    document.querySelectorAll('input[name="modalMode"], input[name="leaveDuration"]').forEach(input => input.addEventListener('change', updateModalControls));
-    byId('modalLeaveType').addEventListener('change', updateModalControls); byId('leaveStartTime').addEventListener('input', () => calculatePeriod()); byId('leaveEndTime').addEventListener('input', () => calculatePeriod());
-
-    function leaveClass(leaveType) { return ({ '1': 'annual', '2': 'sick', '3': 'business', '4': 'other', '5': 'absent', '6': 'mother' })[leaveType] || ''; }
-    function setCellState(cell, leaveType, isTransfer, isCustom) { const isOff = cell.dataset.off === 'true'; cell.classList.remove('leave', 'leave-annual', 'leave-sick', 'leave-business', 'leave-other', 'leave-absent', 'leave-mother', 'transfer', 'hours', 'has-ot'); if (isOff) { cell.classList.add('off'); cell.classList.toggle('has-ot', Number(cell.querySelector('.cell-hours').value) > 0); } else if (leaveType !== noLeave) { cell.classList.add('leave', `leave-${leaveClass(leaveType)}`); } else if (isTransfer) cell.classList.add('transfer'); else if (isCustom) cell.classList.add('hours'); }
-    function leaveLabel() { return byId('modalLeaveType').selectedOptions[0].text.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s*Leave$/, '').trim(); }
-    function updateRowTotals(row) { const cells = [...row.querySelectorAll('.calendar-cell')]; let hasOverLimit = false; row.querySelectorAll('.weekly-total').forEach(totalCell => { const start = Number(totalCell.dataset.weekStartIndex), count = Number(totalCell.dataset.weekCount), weeklyHours = cells.slice(start, start + count).reduce((sum, cell) => sum + Number(cell.querySelector('.cell-hours').value || 0), 0); totalCell.querySelector('output').textContent = weeklyHours.toFixed(2); totalCell.classList.toggle('over-limit', weeklyHours > maxWeeklyHours); totalCell.setAttribute('aria-label', `Weekly total ${weeklyHours.toFixed(2)} hours${weeklyHours > maxWeeklyHours ? ', exceeds the 60 hour limit' : ''}`); hasOverLimit ||= weeklyHours > maxWeeklyHours; }); return hasOverLimit; }
-    function syncWeeklyError() { const hasOverLimit = document.querySelector('.weekly-total.over-limit') !== null, error = byId('attendanceClientError'); error.hidden = !hasOverLimit; if (hasOverLimit) error.textContent = 'Weekly working hours exceed the 60-hour limit. Reduce the hours before submitting.'; return hasOverLimit; }
-
-    function cellChanged(cell) { return Number(cell.querySelector('.cell-hours').value) !== Number(cell.dataset.originalHours) || cell.querySelector('.cell-workshop').value !== cell.dataset.originalWorkshop || cell.querySelector('.cell-leave-type').value !== cell.dataset.originalLeaveType || Number(cell.querySelector('.cell-leave-hours').value) !== Number(cell.dataset.originalLeaveHours); }
-    function isConfirmedPastCell(cell) { return cell.dataset.confirmed === 'true' && cell.dataset.date !== todayIso; }
-    function isLockedCell(cell) { return isConfirmedPastCell(cell) && cellChanged(cell); }
-
-    document.querySelectorAll('.day-button').forEach(button => button.addEventListener('click', () => {
-        activeCell = button.closest('.calendar-cell'); const row = button.closest('tr'), isOff = activeCell.dataset.off === 'true', hours = Number(activeCell.querySelector('.cell-hours').value || 0), leaveType = activeCell.querySelector('.cell-leave-type').value, leaveHours = Number(activeCell.querySelector('.cell-leave-hours').value || standardHours), hasLeave = !isOff && leaveType !== noLeave;
-        byId('modalContext').textContent = `${row.querySelector('.sticky-name').childNodes[0].textContent.trim()} · ${button.dataset.date}${isOff ? ' · OFF / OT' : ''}`; byId('modalWorkshop').value = activeCell.querySelector('.cell-workshop').value || selectedWorkshop; byId('modalHours').value = hours.toFixed(2); byId('modalLeaveType').value = hasLeave ? leaveType : byId('modalLeaveType').options[0].value; byId('modeLeave').disabled = isOff; byId('modeLeave').checked = hasLeave; byId('modeHours').checked = !hasLeave; byId('leaveFullDay').checked = !hasLeave || leaveHours >= standardHours; byId('leavePeriod').checked = hasLeave && leaveHours < standardHours; byId('leaveStartTime').value = '08:00'; byId('leaveEndTime').value = timeFromMinutes(8 * 60 + Math.round(Math.min(leaveHours, standardHours) * 60)); byId('motherStartDate').value = button.dataset.date; byId('motherEndDate').value = button.dataset.date; byId('modalClearLeave').hidden = !hasLeave; byId('modalConfirmedNotice').hidden = !isConfirmedPastCell(activeCell); updateModalControls();
-    }));
-
-    async function saveCellToServer(cell) {
-        const body = new URLSearchParams({
-            employeeId: cell.dataset.employeeId,
-            businessDate: cell.dataset.date,
-            workingHours: cell.querySelector('.cell-hours').value,
-            cellWorkshopId: cell.querySelector('.cell-workshop').value,
-            leaveType: cell.querySelector('.cell-leave-type').value,
-            leaveHours: cell.querySelector('.cell-leave-hours').value,
-            WorkshopId: selectedWorkshop, Shift: '@Model.Shift', StartMonth: '@Model.StartMonth', EndMonth: '@Model.EndMonth'
-        });
-        const token = document.querySelector('#attendanceForm input[name="__RequestVerificationToken"]')?.value;
-        const response = await fetch('@Url.Page("Index", "Cell")', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token || '' }, body });
-        return response.json();
-    }
-
-    byId('modalApply').addEventListener('click', async () => {
-        if (!activeCell) return;
-        const isLeave = byId('modeLeave').checked, leaveType = byId('modalLeaveType').value, isMother = isLeave && leaveType === motherLeave, isPeriod = isLeave && !isMother && byId('leavePeriod').checked, enteredHours = Number(byId('modalHours').value), leaveHours = !isLeave ? 0 : isPeriod ? calculatePeriod(true) : standardHours;
-        if ((!isLeave && (!Number.isFinite(enteredHours) || enteredHours < 0 || enteredHours > standardHours)) || (isLeave && !Number.isFinite(leaveHours))) { if (!isLeave) showModalError('Enter working hours between 0 and 10.67.'); return; }
-        const row = activeCell.closest('tr'); let targets = [activeCell];
-        if (isMother) { const start = byId('motherStartDate').value, end = byId('motherEndDate').value; if (!start || !end || end < start) { showModalError('Select a valid Mother Leave date range.'); return; } targets = [...row.querySelectorAll('.calendar-cell')].filter(cell => cell.dataset.off !== 'true' && cell.dataset.date >= start && cell.dataset.date <= end); if (!targets.length) { showModalError('The selected range has no working days in this calendar.'); return; } }
-        const workshop = byId('modalWorkshop').value, workingHours = isLeave ? Math.max(0, standardHours - leaveHours) : enteredHours;
-        targets.forEach(cell => { const isOff = cell.dataset.off === 'true'; cell.querySelector('.cell-hours').value = workingHours.toFixed(2); cell.querySelector('.cell-workshop').value = workshop; cell.querySelector('.cell-leave-type').value = isLeave ? leaveType : noLeave; cell.querySelector('.cell-leave-hours').value = isLeave ? leaveHours.toFixed(2) : '0.00'; cell.querySelector('.cell-value').textContent = isOff ? workingHours > 0 ? workingHours.toFixed(2) : 'OFF' : isLeave ? leaveLabel() : workingHours.toFixed(2); cell.querySelector('.cell-note').textContent = isOff ? workingHours > 0 ? 'OT hrs' : 'Tap for OT' : isLeave ? (isPeriod ? `${leaveHours.toFixed(2)}h leave` : 'leave') : workshop !== selectedWorkshop ? 'transfer' : 'hrs'; setCellState(cell, isLeave ? leaveType : noLeave, workshop !== selectedWorkshop, !isLeave && workingHours !== standardHours); });
-        updateRowTotals(row); syncWeeklyError();
-
-        const lockedTargets = targets.filter(isLockedCell);
-        if (lockedTargets.length) {
-            byId('modalApply').disabled = true;
-            try {
-                for (const cell of lockedTargets) {
-                    const result = await saveCellToServer(cell);
-                    if (!result.ok) { showModalError(result.error || 'Could not save this day.'); byId('modalApply').disabled = false; return; }
-                }
-            } catch { showModalError('Could not save this day. Check your connection and try again.'); byId('modalApply').disabled = false; return; }
-            byId('modalApply').disabled = false;
-        }
-        bootstrap.Modal.getOrCreateInstance(byId('attendanceModal')).hide();
-    });
-    byId('modalClearLeave').addEventListener('click', () => {
-        if (!activeCell) return;
-        const workshop = activeCell.querySelector('.cell-workshop').value || selectedWorkshop;
-        const restoredHours = activeCell.dataset.off === 'true' ? 0 : standardHours; activeCell.querySelector('.cell-hours').value = restoredHours.toFixed(2); activeCell.querySelector('.cell-leave-type').value = noLeave; activeCell.querySelector('.cell-leave-hours').value = '0.00'; activeCell.querySelector('.cell-value').textContent = activeCell.dataset.off === 'true' ? 'OFF' : restoredHours.toFixed(2); activeCell.querySelector('.cell-note').textContent = activeCell.dataset.off === 'true' ? 'Tap for OT' : workshop !== selectedWorkshop ? 'transfer' : 'hrs'; setCellState(activeCell, noLeave, workshop !== selectedWorkshop, false); updateRowTotals(activeCell.closest('tr')); syncWeeklyError(); bootstrap.Modal.getOrCreateInstance(byId('attendanceModal')).hide();
-    });
-
-    function cellsInRange(startIso, endIso) { return [...document.querySelectorAll('.calendar-cell')].filter(cell => cell.dataset.date >= startIso && cell.dataset.date <= endIso); }
-    function unconfirmedCellsInRange(startIso, endIso) { return cellsInRange(startIso, endIso).filter(cell => cell.dataset.confirmed !== 'true'); }
-
-    byId('attendanceSubmit')?.addEventListener('click', () => {
-        const invalidTotal = [...document.querySelectorAll('.weekly-total')].find(total => Number(total.querySelector('output').textContent) > maxWeeklyHours);
-        if (invalidTotal) { bootstrap.Modal.getOrCreateInstance(byId('weeklyLimitModal')).show(); invalidTotal.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }); return; }
-        byId('confirmSubmitStartDate').value = todayIso;
-        if (isAdmin) byId('confirmSubmitEndDate').value = todayIso;
-        byId('confirmSubmitError').hidden = true;
-        bootstrap.Modal.getOrCreateInstance(byId('confirmSubmitModal')).show();
-    });
-    byId('confirmSubmitOk')?.addEventListener('click', () => {
-        const startIso = byId('confirmSubmitStartDate').value;
-        const endIso = isAdmin ? (byId('confirmSubmitEndDate').value || startIso) : startIso;
-        if (!startIso) { byId('confirmSubmitError').hidden = false; byId('confirmSubmitError').textContent = 'Select a date to submit.'; return; }
-        if (endIso < startIso) { byId('confirmSubmitError').hidden = false; byId('confirmSubmitError').textContent = 'End date cannot be before start date.'; return; }
-        const pending = unconfirmedCellsInRange(startIso, endIso);
-        if (!pending.length) { byId('confirmSubmitError').hidden = false; byId('confirmSubmitError').textContent = 'All days in that date range are already submitted.'; return; }
-        const futureWorkingHours = pending.find(cell => cell.dataset.date > todayIso && cell.querySelector('.cell-leave-type').value === noLeave);
-        if (futureWorkingHours) { byId('confirmSubmitError').hidden = false; byId('confirmSubmitError').textContent = `Working hours for ${futureWorkingHours.dataset.date} cannot be entered in advance. Only leave can be recorded ahead of today.`; return; }
-        byId('submitStartDateField').value = startIso;
-        byId('submitEndDateField').value = endIso;
-        const button = byId('attendanceSubmit'); button.disabled = true; button.textContent = 'Saving…';
-        bootstrap.Modal.getOrCreateInstance(byId('confirmSubmitModal')).hide();
-        byId('attendanceForm').submit();
-    });
-})();
-</script>
+<script id="agData" type="application/json">@Html.Raw(JsonSerializer.Serialize(gridData))</script>
+<script src="~/js/attendance-grid.js" asp-append-version="true"></script>
 }

@@ -34,3 +34,4 @@ appsettings.*.local.json
 .dotnet-cli/
 .agents/
 .claude/
+appsettings.Production.json

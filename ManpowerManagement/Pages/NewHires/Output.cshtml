@@ -1,0 +1,50 @@
+@page
+@model ManpowerManagement.Pages.NewHires.OutputModel
+@using System.Globalization
+@using ManpowerManagement.Services
+@{
+    ViewData["Title"] = "New hire output";
+    var day = Model.Date!.Value;
+}
+<div class="wd-detail">
+    <a class="wd-back" asp-page="/NewHires/Index">← Back to new hires</a>
+    <div class="wd-heading"><div><h1>Daily output</h1><p>Thousand pieces (kps) per new hire · @NewHireText.Date(day)@(Model.Access.Leader is null ? "" : " · " + Model.Access.Leader.WorkshopName)</p></div></div>
+    @if (Model.Message is not null) { <div class="alert alert-success">@Model.Message</div> }
+    @if (Model.Error is not null) { <div class="alert alert-danger">@Model.Error</div> }
+
+    <form method="get" class="nh-actions mb-3">
+        <label class="form-label mb-0" for="date">Business date</label>
+        <input class="form-control" style="width:auto" type="date" id="date" name="date" value="@day.ToString("yyyy-MM-dd")" min="@Model.MinDate.ToString("yyyy-MM-dd")" max="@Model.Today.ToString("yyyy-MM-dd")" />
+        <button class="btn btn-outline-secondary">Go</button>
+        <input type="search" class="form-control" style="width:16rem" id="nh-search" placeholder="Search name or Emp ID" aria-label="Search new hires" />
+    </form>
+
+    <form method="post">
+        <input type="hidden" name="Date" value="@day.ToString("yyyy-MM-dd")" />
+        <div class="wd-card wd-table-wrap nh-output-table"><table class="wd-table">
+            <thead><tr><th scope="col">Emp ID</th><th scope="col">Name</th><th scope="col">Workshop · Shift</th><th scope="col">Process</th><th scope="col">Tenure</th><th scope="col">Output (kps)</th></tr></thead>
+            <tbody id="nh-output-body">
+            @if (Model.Rows.Count == 0) { <tr><td colspan="6" class="wd-empty">No new hires had started by this date.</td></tr> }
+            @for (var i = 0; i < Model.Rows.Count; i++)
+            {
+                var row = Model.Rows[i];
+                <tr>
+                    <td>@row.Code</td><td>@row.Name</td><td>@row.Workshop · @row.Shift</td><td>@row.Process</td>
+                    <td>Day @row.TenureDay · wk @(row.TenureDay / 7 + 1)</td>
+                    <td><input type="hidden" name="Inputs[@i].EmployeeId" value="@row.EmployeeId" /><input class="form-control form-control-sm" type="number" step="0.001" min="0" max="@ManpowerManagement.Pages.NewHires.OutputModel.MaxKps" inputmode="decimal" name="Inputs[@i].Kps" value="@(row.Kps?.ToString("0.###", CultureInfo.InvariantCulture))" aria-label="Output kps for @row.Name" /></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+        <p class="nh-sub mt-2">Leave a box empty for no entry; clearing a saved value removes it.</p>
+        @if (Model.Rows.Count > 0) { <button class="btn btn-success mt-2">Save output</button> }
+    </form>
+</div>
+@section Scripts {
+    <script>
+        document.getElementById('nh-search')?.addEventListener('input', event => {
+            const q = event.target.value.trim().toLowerCase();
+            document.querySelectorAll('#nh-output-body tr').forEach(row => row.classList.toggle('d-none', q !== '' && !row.textContent.toLowerCase().includes(q)));
+        });
+    </script>
+}

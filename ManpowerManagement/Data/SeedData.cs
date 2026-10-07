@@ -12,6 +12,14 @@ public static class SeedData
         "PSLB", "PSLA", "GPSP2", "FPSA", "FPSB"
     ];
 
+    // Workshops selectable for Day-shift employees: (label shown, workshop name stored)
+    public static readonly (string Label, string Name)[] DayWorkshops =
+    [
+        ("Total Production", "Total Production"), ("Chemical Line", "Total Chemical Line"),
+        ("Assembly Line", "Total Assembly Line"), ("Equipment Support", "Equipment Support"),
+        ("Staff Production", "Staff Production")
+    ];
+
     public static async Task InitialiseAsync(IServiceProvider services)
     {
         using var scope = services.CreateScope();
@@ -52,7 +60,7 @@ public static class SeedData
             await RealignWorkshopHierarchyAsync(db);
         }
         var existingWorkshopNames = await db.Workshops.Select(x => x.Name).ToListAsync();
-        foreach (var name in EmployeeWorkshopNames)
+        foreach (var name in EmployeeWorkshopNames.Concat(DayWorkshops.Select(x => x.Name)))
             if (!existingWorkshopNames.Contains(name, StringComparer.OrdinalIgnoreCase))
                 db.Workshops.Add(new Workshop { Name = name });
         await db.SaveChangesAsync();

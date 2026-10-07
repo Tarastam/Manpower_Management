@@ -1,0 +1,216 @@
+@page "{id:int}"
+@model ManpowerManagement.Pages.NewHires.DetailsModel
+@using System.Globalization
+@using ManpowerManagement.Models
+@using ManpowerManagement.Services
+@{
+    var d = Model.Data!;
+    var r = d.Row;
+    ViewData["Title"] = r.Name + " - New hire";
+    var today = BusinessDateService.Current();
+    var milestones = new (string Label, DateOnly Date)[]
+    {
+        ("Start (day 0)", d.Milestones.Start), ("Decision due (day 60)", d.Milestones.DecisionDue),
+        ("Probation ends (day 90)", d.Milestones.ProbationEnd), ("Latest end (day 119)", d.Milestones.MaxEnd)
+    };
+
+    // Output chart: bars are the keyed kps per day.
+    const double W = 760, H = 220, padL = 40, padR = 10, padT = 10, padB = 26;
+    var points = d.Points;
+    var maxY = points.Count == 0 ? 1m : Math.Max(1m, points.Max(p => p.Kps ?? 0));
+    maxY *= 1.15m;
+    double X(int i) => padL + (W - padL - padR) * i / Math.Max(points.Count, 1);
+    double Y(decimal v) => padT + (H - padT - padB) * (1 - (double)(v / maxY));
+    var step = points.Count == 0 ? 1 : (W - padL - padR) / points.Count;
+    var hasOutput = points.Any(p => p.Kps is not null);
+    // Razor reserves the <text> tag, so SVG labels are written as raw markup.
+    string Label(double x, double y, string text) => string.Create(CultureInfo.InvariantCulture, $"<text x=\"{x:0.#}\" y=\"{y:0.#}\">{System.Net.WebUtility.HtmlEncode(text)}</text>");
+}
+<div class="wd-detail">
+    <a class="wd-back" asp-page="/NewHires/Index">← Back to new hires</a>
+    <div class="wd-heading">
+        <div><h1>@r.Name</h1><p>@r.Code · @r.Workshop · Shift @r.Shift@(string.IsNullOrEmpty(r.Process) ? "" : " · " + r.Process)</p></div>
+        <span class="nh-badge @NewHireText.PhaseCss(r.Phase)">@NewHireText.PhaseLabel(r)</span>
+    </div>
+    @if (Model.Message is not null) { <div class="alert alert-success">@Model.Message</div> }
+    @if (Model.Error is not null) { <div class="alert alert-danger">@Model.Error</div> }
+
+    <section class="wd-card nh-panel" aria-labelledby="ms-title">
+        <div class="wd-panel-heading"><div><h2 id="ms-title">Timeline</h2><p>Started @NewHireText.Date(r.StartDate) · @(r.TenureDays < 0 ? "not started yet" : $"day {r.TenureDays}, week {r.TenureWeek}")</p></div></div>
+        <ul class="nh-milestones">
+            @foreach (var (label, date) in milestones) { <li class="@(date <= today ? "is-past" : "")"><b>@label</b>@NewHireText.Date(date)</li> }
+        </ul>
+        @if (r.RiskFlags.Count > 0)
+        {
+            <div class="mt-3"><strong>Risk flags</strong><ul class="nh-flags mt-1">@foreach (var f in r.RiskFlags) { <li>⚑ @f</li> }</ul></div>
+        }
+    </section>
+
+    <section class="wd-card nh-panel" aria-labelledby="dec-title">
+        <div class="wd-panel-heading"><div><h2 id="dec-title">Probation decision</h2><p>The leader decides before day 60: pass, extend (up to day 119 in total) or do not accept. HR acknowledges afterwards.</p></div></div>
+        @if (d.CanDecide)
+        {
+            <form method="post" asp-page-handler="Decision" asp-route-id="@r.Id" class="row g-3">
+                <div class="col-12">
+                    <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="Decision" id="dec-pass" value="@ProbationDecision.Passed" checked="@(Model.Decision == ProbationDecision.Passed)" /><label class="form-check-label" for="dec-pass">Pass probation</label></div>
+                    @if (d.ExtendFrom is not null) { <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="Decision" id="dec-ext" value="@ProbationDecision.Extended" checked="@(Model.Decision == ProbationDecision.Extended)" /><label class="form-check-label" for="dec-ext">Extend probation</label></div> }
+                    <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="Decision" id="dec-no" value="@ProbationDecision.NotPassed" checked="@(Model.Decision == ProbationDecision.NotPassed)" /><label class="form-check-label" for="dec-no">Do not accept</label></div>
+                </div>
+                @if (d.ExtendFrom is not null)
+                {
+                    <div class="col-md-3" id="extend-until-wrap"><label class="form-label" for="ExtendedUntil">Extend until</label><input class="form-control" type="date" id="ExtendedUntil" name="ExtendedUntil" min="@d.ExtendFrom.Value.ToString("yyyy-MM-dd")" max="@d.ExtendTo!.Value.ToString("yyyy-MM-dd")" value="@Model.ExtendedUntil?.ToString("yyyy-MM-dd")" /><div class="form-text">@NewHireText.Date(d.ExtendFrom.Value) – @NewHireText.Date(d.ExtendTo.Value)</div></div>
+                }
+                <div class="col-md-9"><label class="form-label" for="Comment">Leader comment <span class="text-muted">(required for extend / do not accept)</span></label><textarea class="form-control" id="Comment" name="Comment" rows="2" maxlength="500">@Model.Comment</textarea></div>
+                <div class="col-12"><button class="btn btn-primary" onclick="return this.form.Decision.value !== '@ProbationDecision.NotPassed' || confirm('Do not accept this employee? A resignation ticket will be submitted for approval.')">Record decision</button></div>
+            </form>
+        }
+        else if (d.DecisionOpen)
+        {
+            <p class="wd-empty">Waiting for the leader's decision@(Model.Access.Leader is not null && !Model.Access.IsAdmin ? " (you can only decide for employees in " + Model.Access.Leader.WorkshopName + ")" : ""). @(r.Phase == NewHirePhase.DecisionOverdue ? "It is overdue." : "")</p>
+        }
+        @if (d.Reviews.Count > 0)
+        {
+            <div class="wd-table-wrap mt-3"><table class="wd-table">
+                <thead><tr><th scope="col">Decision</th><th scope="col">Extended until</th><th scope="col">Leader comment</th><th scope="col">Decided by</th><th scope="col">HR</th></tr></thead>
+                <tbody>
+                @foreach (var review in d.Reviews)
+                {
+                    <tr>
+                        <td><strong>@NewHireText.DecisionLabel(review.Decision)</strong><br /><small class="nh-sub">@review.DecidedAtUtc.ToLocalTime().ToString("dd MMM yyyy HH:mm", CultureInfo.InvariantCulture)</small></td>
+                        <td>@(review.ExtendedUntil is DateOnly until ? NewHireText.Date(until) : "—")</td>
+                        <td>@review.LeaderComment</td>
+                        <td>@review.DecidedBy</td>
+                        <td>
+                            @if (review.HrAcknowledgedAtUtc is not null) { <span>Acknowledged by @review.HrAcknowledgedBy</span> }
+                            else if (Model.Access.IsHr && review.Id == d.Reviews[0].Id) { <form method="post" asp-page-handler="Acknowledge" asp-route-id="@r.Id"><input type="hidden" name="reviewId" value="@review.Id" /><button class="btn btn-sm btn-success">Acknowledge@(review.Decision == ProbationDecision.Passed ? " &amp; make permanent" : "")</button></form> }
+                            else { <span class="nh-sub">Waiting for HR</span> }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+    </section>
+
+    @if (d.Leaves.Count > 0)
+    {
+        var pendingLeaves = d.Leaves.Count(l => l.Review is null);
+        <section class="wd-card nh-panel" aria-labelledby="leave-title">
+            <div class="wd-panel-heading"><div><h2 id="leave-title">Leave &amp; probation review</h2><p>Every leave, of any type, is a reason to reconsider probation. Save a comment on each one to mark it as reviewed.</p></div>
+                @if (pendingLeaves > 0) { <span class="wd-alert-count">@pendingLeaves to review</span> }</div>
+            <div class="wd-table-wrap"><table class="wd-table">
+                <thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Hours</th><th scope="col">Probation review comment</th></tr></thead>
+                <tbody>
+                @foreach (var leave in d.Leaves)
+                {
+                    <tr>
+                        <td>@NewHireText.Date(leave.Date)</td>
+                        <td>@NewHireText.LeaveLabel(leave.Type)</td>
+                        <td>@leave.Hours.ToString("0.##")</td>
+                        <td>
+                            @if (d.CanNote)
+                            {
+                                <form method="post" asp-page-handler="LeaveNote" asp-route-id="@r.Id" class="nh-note-form">
+                                    <input type="hidden" name="date" value="@leave.Date.ToString("yyyy-MM-dd")" />
+                                    <input class="form-control form-control-sm" name="note" maxlength="500" value="@leave.Review?.Comment" placeholder="e.g. keep watching / consider extending" aria-label="Review comment for leave on @NewHireText.Date(leave.Date)" required />
+                                    <button class="btn btn-sm @(leave.Review is null ? "btn-warning" : "btn-outline-secondary")">@(leave.Review is null ? "Mark reviewed" : "Update")</button>
+                                </form>
+                                @if (leave.Review is not null) { <small class="nh-sub">by @leave.Review.CreatedBy · @leave.Review.CreatedAtUtc.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture)</small> }
+                            }
+                            else if (leave.Review is not null) { <span>@leave.Review.Comment</span><br /><small class="nh-sub">by @leave.Review.CreatedBy</small> }
+                            else { <span class="nh-sub">Not reviewed yet</span> }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        </section>
+    }
+
+    <section class="wd-card nh-panel" aria-labelledby="late-title">
+        <div class="wd-panel-heading"><div><h2 id="late-title">Late arrivals</h2><p>Comments from the leader when this employee came in late.</p></div></div>
+        @if (d.CanNote)
+        {
+            <form method="post" asp-page-handler="LateNote" asp-route-id="@r.Id" class="nh-note-form">
+                <input class="form-control form-control-sm nh-note-date" type="date" name="date" value="@today.ToString("yyyy-MM-dd")" min="@r.StartDate.ToString("yyyy-MM-dd")" max="@today.ToString("yyyy-MM-dd")" aria-label="Date late" required />
+                <input class="form-control form-control-sm" name="note" maxlength="500" placeholder="Late comment (e.g. 15 minutes late, no call)" aria-label="Late comment" required />
+                <button class="btn btn-sm btn-primary">Add</button>
+            </form>
+        }
+        @if (d.LateNotes.Count == 0) { <p class="wd-empty">No late arrivals recorded.</p> }
+        else
+        {
+            <div class="wd-table-wrap mt-2"><table class="wd-table">
+                <thead><tr><th scope="col">Date</th><th scope="col">Comment</th><th scope="col">By</th>@if (d.CanNote) { <th scope="col"><span class="visually-hidden">Remove</span></th> }</tr></thead>
+                <tbody>
+                @foreach (var late in d.LateNotes)
+                {
+                    <tr>
+                        <td>@NewHireText.Date(late.BusinessDate)</td><td>@late.Comment</td><td>@late.CreatedBy</td>
+                        @if (d.CanNote) { <td><form method="post" asp-page-handler="DeleteLate" asp-route-id="@r.Id" onsubmit="return confirm('Remove this late comment?')"><input type="hidden" name="noteId" value="@late.Id" /><button class="btn btn-sm btn-outline-danger">Remove</button></form></td> }
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+    </section>
+
+    <section class="wd-card nh-panel" aria-labelledby="att-title">
+        <div class="wd-panel-heading"><div><h2 id="att-title">Attendance, last 35 days</h2><p>@r.PresentDays of @r.ScheduledDays scheduled days worked (@NewHireText.Pct(r.AttendanceRate)) · leave @NewHireText.Pct(r.LeaveRate) in the rule window</p></div></div>
+        @if (d.Days.Count == 0) { <p class="wd-empty">No days yet.</p> }
+        else
+        {
+            <div class="nh-days">
+                @foreach (var day in d.Days.OrderBy(x => x.Date))
+                {
+                    var css = day.Code == "AB" ? "is-absent" : day.Code is "AL" or "SL" or "BL" or "OL" or "ML" ? "is-leave" : !day.Scheduled ? "is-off" : "";
+                    <div class="nh-day @css"><small>@day.Date.ToString("ddd dd MMM", CultureInfo.InvariantCulture)</small>@day.Code</div>
+                }
+            </div>
+            <p class="nh-sub mt-2">A working day with nothing keyed counts as the standard hours (present). Codes: AB absent, AL/SL/BL/OL/ML leave, OFF day off.</p>
+        }
+    </section>
+
+    <section class="wd-card nh-panel" aria-labelledby="out-title">
+        <div class="wd-panel-heading"><div><h2 id="out-title">Daily output</h2><p>Thousand pieces (kps) per day @(r.RecentKps is null ? "" : $"· last 7 days average {r.RecentKps.Value:0.##} kps")</p></div>
+            @if (Model.Access.CanWrite) { <a class="btn btn-outline-primary btn-sm" asp-page="/NewHires/Output">Enter output</a> }</div>
+        @if (!hasOutput) { <p class="wd-empty">No output entered yet.</p> }
+        else
+        {
+            <svg class="nh-chart" viewBox="0 0 @W @H" role="img" aria-label="Daily output in kps">
+                <line class="axis" x1="@padL" y1="@(H - padB)" x2="@(W - padR)" y2="@(H - padB)" />
+                <line class="axis" x1="@padL" y1="@padT" x2="@padL" y2="@(H - padB)" />
+                @Html.Raw(Label(4, padT + 8, maxY.ToString("0.#", CultureInfo.InvariantCulture)))
+                @Html.Raw(Label(4, H - padB, "0"))
+                @for (var i = 0; i < points.Count; i++)
+                {
+                    if (points[i].Kps is decimal k && k > 0)
+                    {
+                        <rect class="bar" x="@X(i).ToString("0.#", CultureInfo.InvariantCulture)" y="@Y(k).ToString("0.#", CultureInfo.InvariantCulture)" width="@Math.Max(step - 1, 1).ToString("0.#", CultureInfo.InvariantCulture)" height="@((H - padB - Y(k)).ToString("0.#", CultureInfo.InvariantCulture))"><title>@points[i].Date.ToString("dd MMM", CultureInfo.InvariantCulture): @k.ToString("0.##") kps</title></rect>
+                    }
+                    if (i % 14 == 0)
+                    {
+                        @Html.Raw(Label(X(i), H - 8, points[i].Date.ToString("dd MMM", CultureInfo.InvariantCulture)))
+                    }
+                }
+            </svg>
+            <p class="nh-legend"><span><i style="background:var(--wd-accent)"></i>Output (kps)</span></p>
+        }
+    </section>
+</div>
+@section Scripts {
+    <script>
+        (() => {
+            const wrap = document.getElementById('extend-until-wrap');
+            if (!wrap) return;
+            const sync = () => {
+                const extend = document.getElementById('dec-ext')?.checked;
+                wrap.style.display = extend ? '' : 'none';
+                const input = document.getElementById('ExtendedUntil');
+                input.required = !!extend;
+            };
+            document.querySelectorAll('input[name="Decision"]').forEach(el => el.addEventListener('change', sync));
+            sync();
+        })();
+    </script>
+}

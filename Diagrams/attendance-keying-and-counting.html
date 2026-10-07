@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance keying and counting</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', 'Leelawadee UI', Tahoma, system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); min-height: 100vh; padding: 3rem 2rem; display: flex; justify-content: center; }
+    .frame { max-width: 1280px; width: 100%; min-width: 0; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 1280px; display: block; }
+    .cards { display: grid; grid-template-columns: 1.15fr 1fr 0.85fr; gap: 16px; margin-top: 28px; }
+    .card { background: #fff; border: 1px solid rgba(45,49,66,0.14); border-radius: 6px; padding: 16px 18px; }
+    .card h2 { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .card h2::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dot, var(--color-muted)); }
+    .card ul { list-style: none; display: grid; gap: 6px; font-size: 0.82rem; line-height: 1.5; }
+    .card li::before { content: "–"; color: var(--color-muted); margin-right: 8px; }
+    .card code { font-family: var(--font-mono); font-size: 0.74rem; background: rgba(45,49,66,0.06); padding: 1px 4px; border-radius: 2px; }
+    .foot { margin-top: 20px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--color-muted); letter-spacing: 0.04em; }
+    .foot a { color: #2e5aa8; }
+    @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Swimlane · Attendance</p>
+    <h1>Attendance keying and counting</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="attendance-keying-title attendance-keying-desc">
+        <title id="attendance-keying-title">Attendance keying and counting</title>
+        <desc id="attendance-keying-desc">Swimlane showing a leader checking in, keying attendance exceptions that are validated and held in a staging file, then copied to SQL Server at 07:00 and 19:00.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        </defs>
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+<line x1="40" y1="40" x2="1240" y2="40" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="48" y="96" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEADER</text>
+<text x="48" y="108" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">BROWSER</text>
+<line x1="40" y1="160" x2="1240" y2="160" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="48" y="216" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">ATTENDANCE</text>
+<text x="48" y="228" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">PAGE · SERVER</text>
+<line x1="40" y1="280" x2="1240" y2="280" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="48" y="336" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">STAGING</text>
+<text x="48" y="348" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">APP_DATA JSON</text>
+<line x1="40" y1="400" x2="1240" y2="400" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="48" y="456" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">FLUSH WORKER</text>
+<text x="48" y="468" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">→ SQL SERVER</text>
+<line x1="40" y1="520" x2="1240" y2="520" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<line x1="170" y1="40" x2="170" y2="520" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="190" y="336" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="start">Everyone counts 100% (10.67 h) on a working day.</text>
+<text x="190" y="354" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="start">Only exceptions are ever stored.</text>
+<path d="M 300 322 Q 430 312 470 258" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="470" cy="258" r="2" fill="#2d3142"/>
+<text x="190" y="456" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="start">Dashboard and New Hires read SQL plus the staged overlay,</text>
+<text x="190" y="474" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="start">so their numbers are current before 07:00 / 19:00.</text>
+<path d="M 494 452 Q 700 450 802 354" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="802" cy="354" r="2" fill="#2d3142"/>
+<path d="M358 100 H472 Q480 100 480 108 V186" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="395.0" y="80" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="415.0" y="89" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SCOPE</text>
+<path d="M564 220 H650 Q658 220 658 212 V134" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="589.0" y="200" width="36" height="12" rx="2" fill="#f5f5f5"/>
+<text x="607.0" y="209" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">GRID</text>
+<path d="M770 100 H884 Q892 100 892 108 V186" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="799.0" y="80" width="56" height="12" rx="2" fill="#f5f5f5"/>
+<text x="827.0" y="89" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">AUTOSAVE</text>
+<path d="M808 234 H722 Q714 234 714 226 V134" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="722" y="176" width="46" height="12" rx="2" fill="#f5f5f5"/>
+<text x="745.0" y="185" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">REJECT</text>
+<path d="M892 254 V306" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="900" y="262" width="44" height="12" rx="2" fill="#f5f5f5"/>
+<text x="922.0" y="271" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">STAGE</text>
+<path d="M892 374 V426" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="900" y="382" width="56" height="12" rx="2" fill="#f5f5f5"/>
+<text x="928.0" y="391" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SNAPSHOT</text>
+<path d="M976 460 H1036" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="986.0" y="440" width="40" height="12" rx="2" fill="#f5f5f5"/>
+<text x="1006.0" y="449" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WRITE</text>
+<rect x="190" y="66" width="168" height="68" rx="6" fill="#f5f5f5"/>
+<rect x="190" y="66" width="168" height="68" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="274.0" y="92" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Check in</text>
+<text x="274.0" y="109" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">own employee ID</text>
+<text x="274.0" y="122" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">valid until 07:00 rollover</text>
+<rect x="396" y="186" width="168" height="68" rx="6" fill="#f5f5f5"/>
+<rect x="396" y="186" width="168" height="68" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+<text x="480.0" y="212" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Build grid</text>
+<text x="480.0" y="229" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">SQL entry + staged overlay</text>
+<text x="480.0" y="242" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">else default 10.67 h</text>
+<rect x="602" y="66" width="168" height="68" rx="6" fill="#f5f5f5"/>
+<rect x="602" y="66" width="168" height="68" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="686.0" y="92" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Key exceptions</text>
+<text x="686.0" y="109" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">AL · SL · AB · OT hours</text>
+<text x="686.0" y="122" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">indirect headcount by band</text>
+<rect x="808" y="186" width="168" height="68" rx="6" fill="#f5f5f5"/>
+<rect x="808" y="186" width="168" height="68" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="892.0" y="212" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Validate</text>
+<text x="892.0" y="229" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">≤ 10.67 h/day · ≤ 60 h/week</text>
+<text x="892.0" y="242" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">no leave on an OFF day</text>
+<rect x="808" y="306" width="168" height="68" rx="6" fill="#f5f5f5"/>
+<rect x="808" y="306" width="168" height="68" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+<text x="892.0" y="332" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Staging file</text>
+<text x="892.0" y="349" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">attendance-staging.json</text>
+<text x="892.0" y="362" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">exceptions only · versioned</text>
+<rect x="808" y="426" width="168" height="68" rx="6" fill="#f5f5f5"/>
+<rect x="808" y="426" width="168" height="68" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="892.0" y="452" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Flush worker</text>
+<text x="892.0" y="469" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">runs at 07:00 and 19:00</text>
+<text x="892.0" y="482" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">one SaveChanges; retries</text>
+<rect x="1036" y="426" width="168" height="68" rx="6" fill="#f5f5f5"/>
+<rect x="1036" y="426" width="168" height="68" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="1120.0" y="452" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">SQL Server</text>
+<text x="1120.0" y="469" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">AttendanceEntries</text>
+<text x="1120.0" y="482" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ShiftManpowers</text>
+<line x1="40" y1="540" x2="1240" y2="540" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="40" y="558" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="120" y="548" width="24" height="12" rx="3" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+<text x="152" y="557" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">key design point</text>
+<rect x="281.6" y="548" width="24" height="12" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="313.6" y="557" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">step / actor</text>
+<rect x="420.8" y="548" width="24" height="12" rx="3" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="452.8" y="557" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">database</text>
+<line x1="537.6" y1="554" x2="561.6" y2="554" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="569.6" y="557" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">flow</text>
+<line x1="632.0" y1="554" x2="656.0" y2="554" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<text x="664.0" y="557" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">rejected, back to grid</text>
+      </svg>
+    </div>
+    <div class="cards">
+      <div class="card"><h2>ตรวจก่อนบันทึก (Validate)</h2><ul>
+        <li>ชั่วโมงทำงาน + ชั่วโมงลา ต่อวัน ไม่เกิน <code>10.67</code></li>
+        <li>รวมต่อสัปดาห์ (อาทิตย์–เสาร์) ไม่เกิน <code>60</code> ชม. ยกเว้น Leader</li>
+        <li>วัน OFF: ใส่ได้เฉพาะชั่วโมง OT ห้ามใส่ลา</li>
+        <li>วันในอนาคต: ใส่ได้เฉพาะวันลา และใส่ indirect headcount ล่วงหน้าไม่ได้</li>
+        <li>ไม่บันทึกหลังวันทำงานสุดท้ายของคนที่ลาออก</li>
+      </ul></div>
+      <div class="card" style="--dot:#eb6c36"><h2>Business day และการนับ</h2><ul>
+        <li>วันใหม่ตัดที่ <code>07:00</code> และ check-in ของ Leader หมดอายุเมื่อข้ามวัน</li>
+        <li>ไม่มีปุ่ม Submit: ทุกการแก้ถูกส่งอัตโนมัติ แล้วเก็บในไฟล์ก่อน</li>
+        <li>วันทำงานดูจากปฏิทินที่ import ก่อน ถ้าไม่มีใช้รอบ 4 ทำ / 2 OFF ของกะ A/B/C</li>
+        <li>ถ้าเซลล์ถูกแก้กลับเป็นค่าปกติ รายการที่เก็บไว้จะถูกลบ</li>
+      </ul></div>
+      <div class="card"><h2>หน้า Pregnant</h2><ul>
+        <li>คีย์แยกหน้า ไม่ปนในกะปกติ</li>
+        <li><code>8</code> ชม./วัน และ <code>48</code> ชม./สัปดาห์</li>
+        <li>นับวันจันทร์–ศุกร์</li>
+        <li>ใช้ staging file และรอบ flush เดียวกัน</li>
+      </ul></div>
+    </div>
+    <p class="foot">Next: <a href="working-hours-calculation.html">working hours calculation →</a> (runs on the days this flush touches)</p>
+  </div>
+</body>
+</html>

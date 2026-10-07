@@ -1,0 +1,79 @@
+@page
+@model ManpowerManagement.Pages.Admin.LeadersModel
+@{ ViewData["Title"] = "Attendance leaders"; }
+
+<div class="leaders-page py-3">
+    <h1 class="h3 mb-1">Attendance leaders</h1>
+    <p class="text-muted">ลงทะเบียนรหัสพนักงานของหัวหน้างาน และจับคู่กับ Line ที่เขาคีย์งานได้ (Chemical Line หรือ Assembly Line — คีย์ได้ทุก Workshop และทุกกะใน Line นั้น โดยเลือกในหน้า Attendance) หัวหน้างาน 1 คนเพิ่มได้ทั้ง 2 Line (เพิ่มทีละแถว) และเลือกตอน check-in หัวหน้างานที่ไม่อยู่ในรายการนี้จะ check-in หน้า Attendance ไม่ได้</p>
+
+    @if (!string.IsNullOrEmpty(Model.Message)) { <div class="alert alert-success">@Model.Message</div> }
+    @if (!string.IsNullOrEmpty(Model.Error)) { <div class="alert alert-danger">@Model.Error</div> }
+
+    <div class="card card-body mb-3">
+        <h2 class="h5" id="leaderFormTitle">Add leader assignment</h2>
+        <form method="post" asp-page-handler="Save" class="leader-form" id="leaderForm">
+            <input type="hidden" asp-for="EditId" id="editId" />
+            <div class="leader-field"><label class="form-label" for="empCode">Employee ID</label><input id="empCode" class="form-control" asp-for="EmployeeCode" autocomplete="off" required /></div>
+            <div class="leader-field" id="nameGroup" hidden><label class="form-label" for="leaderName">Name</label><input id="leaderName" class="form-control" asp-for="LeaderName" maxlength="200" placeholder="Leader's full name" /></div>
+            <div class="leader-field leader-field-wide"><label class="form-label" for="wsSelect">Workshop</label><select id="wsSelect" class="form-select" asp-for="WorkshopId" asp-items="Model.WorkshopOptions" required><option value="">Select line</option></select></div>
+            <div class="leader-actions"><button class="btn btn-primary" id="saveBtn">Add leader</button><button type="button" class="btn btn-outline-secondary" id="cancelEdit" hidden>Cancel</button></div>
+            <div class="leader-hint" id="empName" aria-live="polite"></div>
+        </form>
+    </div>
+
+    <form method="get" class="mb-2 d-flex gap-2" style="max-width:420px"><input class="form-control" name="search" value="@Model.Search" placeholder="Search ID, name or workshop" /><button class="btn btn-outline-secondary">Search</button></form>
+
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th>Employee ID</th><th>Name</th><th>Workshop</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+            <tbody>
+                @foreach (var l in Model.Leaders)
+                {
+                    <tr class="@(l.IsActive ? "" : "text-muted")">
+                        <td>@l.EmployeeCode</td>
+                        <td>@(string.IsNullOrEmpty(l.Name) ? "—" : l.Name) @if (!l.EmployeeActive) { <span class="badge text-bg-info">not in employee list</span> }</td>
+                        <td>@l.Workshop</td>
+                        <td>@if (l.IsActive) { <span class="badge text-bg-success">Active</span> } else { <span class="badge text-bg-secondary">Disabled</span> }</td>
+                        <td class="text-end text-nowrap">
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-edit="@l.Id" data-code="@l.EmployeeCode" data-name="@l.Name" data-ws="@l.WorkshopId" data-known="@l.EmployeeActive.ToString().ToLowerInvariant()">Edit</button>
+                            <form method="post" asp-page-handler="Toggle" asp-route-id="@l.Id" class="d-inline"><button class="btn btn-sm btn-outline-secondary">@(l.IsActive ? "Disable" : "Enable")</button></form>
+                            <form method="post" asp-page-handler="Delete" asp-route-id="@l.Id" class="d-inline" onsubmit="return confirm('Remove @l.EmployeeCode from attendance leaders?')"><button class="btn btn-sm btn-outline-danger">Remove</button></form>
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Leaders.Any()) { <tr><td colspan="5" class="text-muted text-center py-3">No leaders registered yet.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(() => {
+    const $ = id => document.getElementById(id), code = $('empCode'), name = $('empName');
+    let timer, known = true;
+    // A name is only needed for a leader who is not in the employee master.
+    const syncName = () => { $('nameGroup').hidden = known; $('leaderName').required = !known; };
+    // Show the employee's name from the employee master.
+    code.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+            const value = code.value.trim(); if (!value) { name.textContent = ''; return; }
+            const res = await (await fetch(`?handler=Lookup&code=${encodeURIComponent(value)}`)).json();
+            known = res.ok;
+            name.textContent = res.ok ? res.name : 'ไม่พบในรายชื่อพนักงาน — เพิ่มได้โดยกรอกชื่อ';
+            name.className = 'leader-hint ' + (res.ok ? 'is-ok' : 'is-warn');
+            syncName();
+
+        }, 300);
+    });
+    document.querySelectorAll('[data-edit]').forEach(btn => btn.addEventListener('click', () => {
+        $('editId').value = btn.dataset.edit; code.value = btn.dataset.code; $('wsSelect').value = btn.dataset.ws || '';
+        name.textContent = btn.dataset.name; name.className = 'leader-hint'; known = btn.dataset.known === 'true'; $('leaderName').value = known ? '' : btn.dataset.name; syncName();
+        $('leaderFormTitle').textContent = `Edit leader ${btn.dataset.code}`; $('saveBtn').textContent = 'Save changes'; $('cancelEdit').hidden = false;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }));
+    $('cancelEdit').addEventListener('click', () => { $('leaderForm').reset(); $('editId').value = ''; $('leaderFormTitle').textContent = 'Add leader assignment'; $('saveBtn').textContent = 'Add leader'; $('cancelEdit').hidden = true; name.textContent = ''; known = true; syncName(); });
+})();
+</script>
+}

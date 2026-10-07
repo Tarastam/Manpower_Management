@@ -1,0 +1,60 @@
+@page
+@model ManpowerManagement.Pages.Attendance.CheckInModel
+@{
+    ViewData["Title"] = "Leader check-in";
+}
+
+<div class="attendance-page checkin-page">
+    <div class="attendance-heading">
+        <div><span class="attendance-eyebrow">ATTENDANCE · LEADER CHECK-IN</span><h1>Leader check-in</h1><p>Enter your leader employee ID. Your workshop will be set to the assignments registered by Admin.</p></div>
+    </div>
+
+    <div class="checkin-card">
+        @if (Model.Current is { } current && Model.Candidates.Count == 0)
+        {
+            <p class="checkin-label">Checked in today as</p>
+            <div class="checkin-scope"><strong>@current.Name</strong><span>@current.EmployeeCode</span></div>
+            <div class="checkin-badges"><span class="scope-chip workshop">@current.WorkshopName</span></div>
+            <div class="checkin-actions">
+                <a class="btn btn-primary btn-lg" asp-page="@(Model.ReturnPage switch { "NewHires" => "/NewHires/Index", "Employees" => "/Employees/Index", _ => "/Attendance/Index" })">@(Model.ReturnPage switch { "NewHires" => "Go to new hires", "Employees" => "Go to employees", _ => "Go to attendance" })</a>
+                <form method="post" asp-page-handler="Lookup"><input type="hidden" name="EmployeeCode" value="@current.EmployeeCode" /><input type="hidden" name="ReturnPage" value="@Model.ReturnPage" /><button class="btn btn-outline-primary btn-lg">Change workshop</button></form>
+                <form method="post" asp-page-handler="SignOut"><button class="btn btn-outline-secondary btn-lg">Change leader</button></form>
+            </div>
+        }
+        else if (Model.Candidates.Count > 0)
+        {
+            var first = Model.Candidates[0];
+            <p class="checkin-label">Confirm your identity and select the workshop for attendance.</p>
+            <div class="checkin-scope"><strong>@first.Name</strong><span>@first.EmployeeCode</span></div>
+            <form method="post" asp-page-handler="Confirm">
+                <input type="hidden" asp-for="EmployeeCode" /><input type="hidden" asp-for="ReturnPage" />
+                <div class="checkin-options" role="radiogroup" aria-label="Workshop">
+                    @foreach (var c in Model.Candidates)
+                    {
+                        <label class="checkin-option"><input type="radio" name="AssignmentId" value="@c.AssignmentId" checked="@(c.AssignmentId == Model.AssignmentId)" required /><span><span class="scope-chip workshop">@c.WorkshopName</span></span></label>
+                    }
+                </div>
+                <p class="small text-muted">If a workshop is missing or wrong, ask Admin to update your leader registration.</p>
+                <div class="checkin-actions">
+                    <button class="btn btn-success btn-lg">Confirm and start</button>
+                    <a class="btn btn-outline-secondary btn-lg" asp-page="/Attendance/CheckIn" asp-route-returnPage="@Model.ReturnPage">Back</a>
+                </div>
+            </form>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="Lookup" class="checkin-form">
+                <input type="hidden" asp-for="ReturnPage" />
+                <label class="form-label" for="employeeCode">Leader employee ID</label>
+                <input id="employeeCode" class="form-control form-control-lg" asp-for="EmployeeCode" inputmode="numeric" autocomplete="off" autofocus placeholder="e.g. 1207613" />
+                <button class="btn btn-primary btn-lg">Continue</button>
+            </form>
+        }
+        @if (!string.IsNullOrEmpty(Model.Error)) { <div class="alert alert-danger mt-3 mb-0" role="alert">@Model.Error</div> }
+    </div>
+
+    @if (Model.IsAdmin)
+    {
+        <p class="mt-3 small text-muted">You are signed in as Admin. <a asp-page="/Attendance/Index">Open attendance without check-in</a> to choose any workshop and shift.</p>
+    }
+</div>

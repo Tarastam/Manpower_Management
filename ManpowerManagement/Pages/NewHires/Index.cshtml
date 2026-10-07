@@ -1,0 +1,123 @@
+@page
+@model ManpowerManagement.Pages.NewHires.IndexModel
+@using ManpowerManagement.Services
+@{
+    ViewData["Title"] = "New hire monitoring";
+    var data = Model.Data;
+    // Workshops are managed as two lines only; a line covers every workshop under it.
+    var lines = data.Workshops.Where(w => ManpowerManagement.Pages.Admin.LeadersModel.LineNames.Contains(w.Name)).ToList();
+    string LineLabel(string name) => name.Replace("Total ", "");
+}
+<div class="workforce-dashboard">
+    <div class="wd-heading">
+        <div>
+            <h1>New hire monitoring</h1>
+            <p>@LineLabel(data.WorkshopLabel) · as of @NewHireText.Date(data.Today)</p>
+        </div>
+        <div class="nh-actions">
+            @if (Model.Access is { IsHr: false, Leader: { } leader })
+            {
+                <div class="nh-leader" title="You can see new hires in every line, but you can only record output and probation decisions for your own line.">
+                    <span class="nh-leader-label">Logged in as</span>
+                    <strong>@leader.Name</strong>
+                    <span class="nh-leader-line">@LineLabel(leader.WorkshopName)</span>
+                    <a asp-page="/Attendance/CheckIn" asp-route-returnPage="NewHires">Change</a>
+                </div>
+            }
+            @if (Model.Access.CanWrite) { <a class="btn btn-primary" asp-page="/NewHires/Output">Enter daily output</a> }
+            @if (Model.Access.IsAdmin) { <a class="btn btn-outline-secondary" asp-page="/Admin/NewHireRules">Early-warning rules</a> }
+        </div>
+    </div>
+    @if (Model.Message is not null) { <div class="alert alert-success">@Model.Message</div> }
+
+    <form class="wd-filters" method="get">
+        <div class="wd-filter-field wd-month">
+            <label for="nh-workshop">Line</label>
+            <select id="nh-workshop" name="workshopId">
+                <option value="">All lines</option>
+                @foreach (var line in lines) { <option value="@line.Id" selected="@(data.WorkshopId == line.Id)">@LineLabel(line.Name)</option> }
+            </select>
+        </div>
+        <div class="wd-filter-field wd-month">
+            <label for="nh-phase">Show</label>
+            <select id="nh-phase" name="phase">
+                @foreach (var (value, label) in ManpowerManagement.Pages.NewHires.IndexModel.PhaseFilters) { <option value="@value" selected="@(Model.Phase == value)">@label</option> }
+            </select>
+        </div>
+        <button class="wd-apply" type="submit">Apply filters</button>
+    </form>
+
+    <section class="wd-kpis" aria-label="New hire metrics">
+        <article class="wd-card wd-kpi">
+            <span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">●</span>
+            <div><h2>New hires</h2><strong>@data.Rows.Count.ToString("N0")</strong><p>Tagged as New Employee and not yet passed probation</p></div>
+        </article>
+        <article class="wd-card wd-kpi">
+            <span class="wd-kpi-icon wd-icon-amber" aria-hidden="true">!</span>
+            <div><h2>Decisions to make</h2><strong>@((data.DecisionSoon + data.DecisionOverdue).ToString("N0"))</strong><p>@data.DecisionOverdue overdue · @data.DecisionSoon due soon</p></div>
+        </article>
+        <article class="wd-card wd-kpi">
+            <span class="wd-kpi-icon wd-icon-amber" aria-hidden="true">⚑</span>
+            <div><h2>At risk of leaving</h2><strong>@data.AtRisk.ToString("N0")</strong><p>Flagged by attendance or leave rules</p></div>
+        </article>
+        <article class="wd-card wd-kpi">
+            <span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">↻</span>
+            <div><h2>90-day retention</h2><strong>@NewHireText.Pct(data.Retention90)</strong><p>Last 6 months of hires who reached day 90</p></div>
+        </article>
+    </section>
+    <section class="wd-kpis nh-kpis-2" aria-label="Absence comparison">
+        <article class="wd-card wd-kpi">
+            <span class="wd-kpi-icon wd-icon-amber" aria-hidden="true">!</span>
+            <div><h2>New hire absence rate</h2><strong>@NewHireText.Pct(data.NewHireAbsenceRate)</strong><p>Leave hours ÷ worked person-days, last 30 days</p></div>
+        </article>
+        <article class="wd-card wd-kpi">
+            <span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">✓</span>
+            <div><h2>Other staff absence rate</h2><strong>@NewHireText.Pct(data.PermanentAbsenceRate)</strong><p>Employees not tagged as new, same measure</p></div>
+        </article>
+    </section>
+
+    <section class="wd-card nh-panel" aria-labelledby="nh-table-title">
+        <div class="wd-panel-heading"><div><h2 id="nh-table-title">New hires</h2><p>Sorted by what needs attention first. Day 0 is the start date; the decision is due by day 60.</p></div><span class="wd-alert-count">@Model.Rows.Count.ToString("N0") shown</span></div>
+        <div class="wd-table-wrap">
+            <table class="wd-table nh-table">
+                <thead><tr><th scope="col">Emp ID</th><th scope="col">Name</th><th scope="col">Workshop · Shift</th><th scope="col">Start date</th><th scope="col">Tenure</th><th scope="col">Probation</th><th scope="col">Attendance</th><th scope="col">Output (7d avg)</th><th scope="col">Risk flags</th><th scope="col"><span class="visually-hidden">Open</span></th></tr></thead>
+                <tbody>
+                @if (Model.Rows.Count == 0) { <tr><td colspan="10" class="wd-empty">No new hires match this selection.</td></tr> }
+                @foreach (var r in Model.Rows)
+                {
+                    <tr>
+                        <td>@r.Code</td>
+                        <td>@r.Name</td>
+                        <td>@r.Workshop · @r.Shift</td>
+                        <td>@NewHireText.Date(r.StartDate)</td>
+                        <td>@(r.TenureDays < 0 ? "—" : $"Day {r.TenureDays} · wk {r.TenureWeek}")</td>
+                        <td><span class="nh-badge @NewHireText.PhaseCss(r.Phase)">@NewHireText.PhaseLabel(r)</span></td>
+                        <td>@NewHireText.Pct(r.AttendanceRate)@if (r.ConsecutiveAbsent > 0) { <small class="nh-sub"> · AB ×@r.ConsecutiveAbsent</small> }</td>
+                        <td>@if (r.RecentKps is null) { <span class="nh-sub">No entries (7d)</span> } else { <span>@r.RecentKps.Value.ToString("0.##") kps</span> }</td>
+                        <td>@if (r.RiskFlags.Count == 0) { <span class="nh-sub">—</span> } else { <ul class="nh-flags">@foreach (var f in r.RiskFlags) { <li>@f</li> }</ul> }</td>
+                        <td><a asp-page="/NewHires/Details" asp-route-id="@r.Id">Open <span aria-hidden="true">→</span><span class="visually-hidden"> @r.Name</span></a></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="wd-card nh-panel" aria-labelledby="nh-cohort-title">
+        <div class="wd-panel-heading"><div><h2 id="nh-cohort-title">Retention by start month</h2><p>Share of each month's hires still employed at day 30 / 60 / 90 / 119. Only people who have reached that day are counted.</p></div></div>
+        <div class="wd-table-wrap">
+            <table class="wd-table">
+                <thead><tr><th scope="col">Start month</th><th scope="col">Hired</th><th scope="col">Still employed</th><th scope="col">Resigned</th><th scope="col">Day 30</th><th scope="col">Day 60</th><th scope="col">Day 90</th><th scope="col">Day 119</th></tr></thead>
+                <tbody>
+                @if (data.Cohorts.Count == 0) { <tr><td colspan="8" class="wd-empty">No hires in the last 6 months for this selection.</td></tr> }
+                @foreach (var c in data.Cohorts)
+                {
+                    <tr><td>@c.Month</td><td>@c.Hired</td><td>@c.StillEmployed</td><td>@c.Resigned</td>
+                        @foreach (var point in new[] { c.Day30, c.Day60, c.Day90, c.Day119 }) { <td title="@point.Retained of @point.Eligible">@NewHireText.Pct(point.Percent)</td> }
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>

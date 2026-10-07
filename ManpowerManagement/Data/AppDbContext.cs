@@ -13,10 +13,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbCo
     public DbSet<EmployeeHistory> EmployeeHistories => Set<EmployeeHistory>();
     public DbSet<WorkCalendar> WorkCalendars => Set<WorkCalendar>();
     public DbSet<AttendanceEntry> AttendanceEntries => Set<AttendanceEntry>();
+    public DbSet<ShiftManpower> ShiftManpowers => Set<ShiftManpower>();
+    public DbSet<AttendanceLeader> AttendanceLeaders => Set<AttendanceLeader>();
     public DbSet<ResignationTicket> ResignationTickets => Set<ResignationTicket>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<SpecialGroup> SpecialGroups => Set<SpecialGroup>();
     public DbSet<EmployeeSpecialGroup> EmployeeSpecialGroups => Set<EmployeeSpecialGroup>();
+    public DbSet<ProbationReview> ProbationReviews => Set<ProbationReview>();
+    public DbSet<NewHireOutput> NewHireOutputs => Set<NewHireOutput>();
+    public DbSet<NewHireNote> NewHireNotes => Set<NewHireNote>();
+    public DbSet<NewHireRiskSetting> NewHireRiskSettings => Set<NewHireRiskSetting>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -45,6 +51,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbCo
         builder.Entity<AttendanceEntry>().HasIndex(x => new { x.BusinessDate, x.Shift, x.EmployeeId }).IsUnique();
         builder.Entity<AttendanceEntry>().HasIndex(x => new { x.EmployeeId, x.BusinessDate, x.Shift });
         builder.Entity<WorkCalendar>().HasIndex(x => new { x.WorkshopId, x.WorkDate }).IsUnique();
+        builder.Entity<AttendanceEntry>().Property(x => x.EnteredBy).HasMaxLength(100);
+        builder.Entity<ShiftManpower>().Property(x => x.Shift).HasMaxLength(16);
+        builder.Entity<ShiftManpower>().Property(x => x.EnteredBy).HasMaxLength(100);
+        builder.Entity<ShiftManpower>().Property(x => x.TotalHours).HasPrecision(9, 2);
+        builder.Entity<ShiftManpower>().Property(x => x.IndirectHours).HasPrecision(9, 2);
+        builder.Entity<ShiftManpower>().HasIndex(x => new { x.BusinessDate, x.WorkshopId, x.Shift }).IsUnique();
+        builder.Entity<AttendanceLeader>().Property(x => x.EmployeeCode).HasMaxLength(50);
+        builder.Entity<AttendanceLeader>().Property(x => x.Shift).HasMaxLength(16);
+        builder.Entity<AttendanceLeader>().Property(x => x.LeaderName).HasMaxLength(200);
+        builder.Entity<AttendanceLeader>().HasIndex(x => new { x.EmployeeCode, x.WorkshopId, x.Shift }).IsUnique();
+        builder.Entity<AttendanceLeader>().HasOne(x => x.Workshop).WithMany().HasForeignKey(x => x.WorkshopId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ShiftManpower>().HasOne(x => x.Workshop).WithMany().HasForeignKey(x => x.WorkshopId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Workshop>().HasOne(x => x.Parent).WithMany(x => x.Children).HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<AttendanceEntry>().Property(x => x.WorkingHours).HasPrecision(5, 2);
         builder.Entity<AttendanceEntry>().Property(x => x.LeaveHours).HasPrecision(5, 2);
@@ -57,5 +75,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbCo
         builder.Entity<EmployeeSpecialGroup>().HasKey(x => new { x.EmployeeId, x.SpecialGroupId });
         builder.Entity<EmployeeSpecialGroup>().HasOne(x => x.Employee).WithMany(x => x.SpecialGroups).HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Cascade);
         builder.Entity<EmployeeSpecialGroup>().HasOne(x => x.SpecialGroup).WithMany().HasForeignKey(x => x.SpecialGroupId).OnDelete(DeleteBehavior.Restrict);
+        // New hire monitoring. Dates in the new tables are real date columns; only the legacy Employee dates are text.
+        builder.Entity<ProbationReview>().Property(x => x.LeaderComment).HasMaxLength(500);
+        builder.Entity<ProbationReview>().Property(x => x.DecidedBy).HasMaxLength(100);
+        builder.Entity<ProbationReview>().Property(x => x.HrAcknowledgedBy).HasMaxLength(100);
+        builder.Entity<ProbationReview>().Property(x => x.Decision).HasConversion<string>().HasMaxLength(32);
+        builder.Entity<ProbationReview>().HasIndex(x => new { x.EmployeeId, x.DecidedAtUtc });
+        builder.Entity<ProbationReview>().HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Cascade);
+        builder.Entity<NewHireOutput>().Property(x => x.Kps).HasPrecision(9, 3);
+        builder.Entity<NewHireOutput>().Property(x => x.EnteredBy).HasMaxLength(100);
+        builder.Entity<NewHireOutput>().HasIndex(x => new { x.EmployeeId, x.BusinessDate }).IsUnique();
+        builder.Entity<NewHireOutput>().HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Cascade);
+        builder.Entity<NewHireNote>().Property(x => x.Kind).HasMaxLength(16);
+        builder.Entity<NewHireNote>().Property(x => x.Comment).HasMaxLength(500);
+        builder.Entity<NewHireNote>().Property(x => x.CreatedBy).HasMaxLength(100);
+        builder.Entity<NewHireNote>().HasIndex(x => new { x.EmployeeId, x.Kind, x.BusinessDate }).IsUnique();
+        builder.Entity<NewHireNote>().HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Cascade);
+        builder.Entity<NewHireRiskSetting>().Property(x => x.Id).ValueGeneratedNever();
+        builder.Entity<NewHireRiskSetting>().Property(x => x.LeaveRatePercent).HasPrecision(5, 2);
     }
 }

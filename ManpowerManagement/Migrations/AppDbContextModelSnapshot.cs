@@ -102,6 +102,10 @@ namespace ManpowerManagement.Migrations
                     b.Property<int>("EmployeeId")
                         .HasColumnType("int");
 
+                    b.Property<string>("EnteredBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<bool>("IsConfirmed")
                         .HasColumnType("bit");
 
@@ -136,6 +140,47 @@ namespace ManpowerManagement.Migrations
                     b.HasIndex("EmployeeId", "BusinessDate", "Shift");
 
                     b.ToTable("AttendanceEntries", "mp");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.AttendanceLeader", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("EmployeeCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LeaderName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Shift")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("WorkshopId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkshopId");
+
+                    b.HasIndex("EmployeeCode", "WorkshopId", "Shift")
+                        .IsUnique();
+
+                    b.ToTable("AttendanceLeaders", "mp");
                 });
 
             modelBuilder.Entity("ManpowerManagement.Models.AuditLog", b =>
@@ -203,6 +248,9 @@ namespace ManpowerManagement.Migrations
                     b.Property<string>("FullName")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsNewEmployee")
+                        .HasColumnType("bit");
 
                     b.Property<string>("JobGrade")
                         .IsRequired()
@@ -290,6 +338,152 @@ namespace ManpowerManagement.Migrations
                     b.ToTable("EmployeeSpecialGroups", "mp");
                 });
 
+            modelBuilder.Entity("ManpowerManagement.Models.NewHireNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateOnly>("BusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Comment")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId", "Kind", "BusinessDate")
+                        .IsUnique();
+
+                    b.ToTable("NewHireNotes", "mp");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.NewHireOutput", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateOnly>("BusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EnteredBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<decimal>("Kps")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId", "BusinessDate")
+                        .IsUnique();
+
+                    b.ToTable("NewHireOutputs", "mp");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.NewHireRiskSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ConsecutiveAbsentDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DecisionWarningDay")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("LeaveRatePercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("LeaveRateWindowDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("NoShowDays")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("NewHireRiskSettings", "mp");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.ProbationReview", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DecidedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly?>("ExtendedUntil")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("HrAcknowledgedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("HrAcknowledgedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("LeaderComment")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId", "DecidedAtUtc");
+
+                    b.ToTable("ProbationReviews", "mp");
+                });
+
             modelBuilder.Entity("ManpowerManagement.Models.ResignationTicket", b =>
                 {
                     b.Property<int>("Id")
@@ -331,6 +525,72 @@ namespace ManpowerManagement.Migrations
                     b.HasIndex("WorkshopId");
 
                     b.ToTable("ResignationTickets", "mp");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.ShiftManpower", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateOnly>("BusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("CalculatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("DirectCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EnteredBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Indirect1067Count")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Indirect733Count")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Indirect841Count")
+                        .HasColumnType("int");
+
+                    b.Property<int>("IndirectCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("IndirectHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<bool>("IndirectHoursIsManual")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Shift")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<decimal?>("TotalHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("WorkshopId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkshopId");
+
+                    b.HasIndex("BusinessDate", "WorkshopId", "Shift")
+                        .IsUnique();
+
+                    b.ToTable("ShiftManpowers", "mp");
                 });
 
             modelBuilder.Entity("ManpowerManagement.Models.SpecialGroup", b =>
@@ -559,6 +819,17 @@ namespace ManpowerManagement.Migrations
                     b.Navigation("Workshop");
                 });
 
+            modelBuilder.Entity("ManpowerManagement.Models.AttendanceLeader", b =>
+                {
+                    b.HasOne("ManpowerManagement.Models.Workshop", "Workshop")
+                        .WithMany()
+                        .HasForeignKey("WorkshopId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Workshop");
+                });
+
             modelBuilder.Entity("ManpowerManagement.Models.Employee", b =>
                 {
                     b.HasOne("ManpowerManagement.Models.Workshop", "CurrentWorkshop")
@@ -608,6 +879,39 @@ namespace ManpowerManagement.Migrations
                     b.Navigation("SpecialGroup");
                 });
 
+            modelBuilder.Entity("ManpowerManagement.Models.NewHireNote", b =>
+                {
+                    b.HasOne("ManpowerManagement.Models.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.NewHireOutput", b =>
+                {
+                    b.HasOne("ManpowerManagement.Models.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.ProbationReview", b =>
+                {
+                    b.HasOne("ManpowerManagement.Models.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
             modelBuilder.Entity("ManpowerManagement.Models.ResignationTicket", b =>
                 {
                     b.HasOne("ManpowerManagement.Models.Employee", "Employee")
@@ -623,6 +927,17 @@ namespace ManpowerManagement.Migrations
                         .IsRequired();
 
                     b.Navigation("Employee");
+
+                    b.Navigation("Workshop");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.ShiftManpower", b =>
+                {
+                    b.HasOne("ManpowerManagement.Models.Workshop", "Workshop")
+                        .WithMany()
+                        .HasForeignKey("WorkshopId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Workshop");
                 });

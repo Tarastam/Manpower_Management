@@ -1,0 +1,22 @@
+@page
+@model ManpowerManagement.Pages.HighLeaveModel
+@using System.Globalization
+@{
+    ViewData["Title"] = "High leave rate";
+    var monthLabel = DateTime.ParseExact(Model.Report.Month, "yyyy-MM", CultureInfo.InvariantCulture).ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+}
+<div class="wd-detail">
+    <a class="wd-back" asp-page="/Index" asp-route-month="@Model.Report.Month" asp-route-workshopId="@Model.Report.WorkshopId">← Back to dashboard</a>
+    <div class="wd-heading"><div><h1>Employees with high leave rate</h1><p>@Model.Report.WorkshopLabel · @monthLabel</p></div><span class="wd-alert-count">@Model.Employees.Count.ToString("N0") above 5%</span></div>
+    <p class="wd-detail-description">Employees whose confirmed leave hours exceed 5% of their scheduled hours. @(Model.Report.PeriodEnd == DateOnly.Parse(Model.Report.Month + "-01") ? "No reporting days yet." : "Data through " + Model.Report.PeriodEnd.AddDays(-1).ToString("dd MMM yyyy", CultureInfo.InvariantCulture) + ".")</p>
+    <div class="wd-card wd-table-wrap"><table class="wd-table">
+        <thead><tr><th scope="col">Emp ID</th><th scope="col">Name</th><th scope="col">Shift</th><th scope="col">Leave hours</th><th scope="col">Scheduled days</th><th scope="col">Leave rate</th></tr></thead>
+        <tbody>
+        @if (Model.Employees.Count == 0) { <tr><td class="wd-empty" colspan="6">No employees exceed the 5% leave threshold for this workshop.</td></tr> }
+        @foreach (var employee in Model.Employees)
+        {
+            <tr><td>@employee.Code</td><td>@employee.Name</td><td>@employee.Shift</td><td>@employee.LeaveHours.ToString("N2")</td><td>@employee.ScheduledDays</td><td><strong>@employee.Rate.ToString("N1")%</strong></td></tr>
+        }
+        </tbody>
+    </table></div>
+</div>

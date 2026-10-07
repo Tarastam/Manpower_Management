@@ -1,4 +1,9 @@
-﻿<!DOCTYPE html>
+﻿@{
+    // The menu item for the current page (or its section) is highlighted.
+    var currentPage = ViewContext.RouteData.Values["page"] as string ?? "";
+    string NavActive(params string[] pages) => pages.Any(p => currentPage == p || currentPage.StartsWith(p + "/")) ? " active" : "";
+}
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -7,6 +12,7 @@
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/light-theme.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/dashboard.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/ManpowerManagement.styles.css" asp-append-version="true" />
 </head>
 <body>
@@ -20,12 +26,27 @@
                 </button>
                 <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
                     <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item"><a class="nav-link text-dark" asp-page="/Attendance/Index">Attendance</a></li>
-                        <li class="nav-item"><a class="nav-link text-dark" asp-page="/Employees/Index">Employees</a></li>
-                        <li class="nav-item"><a class="nav-link text-dark" asp-page="/Tickets/Create">Resignation Ticket</a></li>
-                        @if (User.IsInRole("Admin") || User.IsInRole("ResignationApprover")) { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Tickets/Manage">Tickets</a></li> }
-                        @if (User.IsInRole("Admin")) { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Admin/Setup">Admin</a></li> }
-                        @if (User.IsInRole("Admin")) { <li class="nav-item"><a class="nav-link text-dark" asp-page="/SpecialGroups/Index">Special Groups</a></li> }
+                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Index", "/HighLeave"))" asp-page="/Index">Dashboard</a></li>
+                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Attendance"))" asp-page="/Attendance/Index">Attendance</a></li>
+                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Employees"))" asp-page="/Employees/Index">Employees</a></li>
+                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/NewHires", "/Admin/NewHireRules"))" asp-page="/NewHires/Index">New Hires</a></li>
+                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Tickets/Create"))" asp-page="/Tickets/Create">Resignation Ticket</a></li>
+                        @if (User.IsInRole("Admin") || User.IsInRole("ResignationApprover"))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle text-dark@(NavActive("/Tickets/Manage", "/Admin/Setup", "/Admin/Import", "/Admin/Leaders", "/Admin/WorkingHours", "/SpecialGroups"))" href="#" id="managementMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">Management</a>
+                                <ul class="dropdown-menu" aria-labelledby="managementMenu">
+                                    <li><a class="dropdown-item@(NavActive("/Tickets/Manage"))" asp-page="/Tickets/Manage">Tickets</a></li>
+                                    @if (User.IsInRole("Admin"))
+                                    {
+                                        <li><a class="dropdown-item@(NavActive("/Admin/Setup", "/Admin/Import"))" asp-page="/Admin/Setup">Admin</a></li>
+                                        <li><a class="dropdown-item@(NavActive("/Admin/Leaders"))" asp-page="/Admin/Leaders">Leaders</a></li>
+                                        <li><a class="dropdown-item@(NavActive("/Admin/WorkingHours"))" asp-page="/Admin/WorkingHours">Working Hour</a></li>
+                                        <li><a class="dropdown-item@(NavActive("/SpecialGroups"))" asp-page="/SpecialGroups/Index">Special Groups</a></li>
+                                    }
+                                </ul>
+                            </li>
+                        }
                     </ul>
                     @if (User.Identity?.IsAuthenticated == true) { <span class="small text-muted me-2">@User.Identity.Name</span><form method="post" asp-page="/Account/Logout"><button class="btn btn-outline-secondary btn-sm">Logout</button></form> } else { <a class="btn btn-outline-primary btn-sm" asp-page="/Account/Login">Admin / Approver Login</a> }
                 </div>

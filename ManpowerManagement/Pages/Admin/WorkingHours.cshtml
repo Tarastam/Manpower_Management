@@ -1,0 +1,127 @@
+@page
+@model ManpowerManagement.Pages.Admin.WorkingHoursModel
+@using ManpowerManagement.Pages.Admin
+@{ ViewData["Title"] = "Working Hour"; }
+
+<div class="workforce-dashboard wh-page">
+    <div class="wd-heading">
+        <div>
+            <h1>การคำนวณชั่วโมง</h1>
+            <p>Total / Indirect / Direct hours รายวัน แยกตาม Workshop และกะ (เฉพาะวันที่ปิดแล้ว)</p>
+        </div>
+        <p class="wd-period-note">วันที่คำนวณล่าสุด: @(Model.LastCalculatedAt is DateTime t ? WorkingHoursModel.ThaiDateTime(t) : "—")</p>
+    </div>
+
+    <form class="wh-filters" method="get">
+        <div class="wd-filter-field"><label for="whFrom">ช่วงวันที่ (จาก)</label><input id="whFrom" type="date" name="from" value="@Model.From?.ToString("yyyy-MM-dd")" /></div>
+        <div class="wd-filter-field"><label for="whTo">ช่วงวันที่ (ถึง)</label><input id="whTo" type="date" name="to" value="@Model.To?.ToString("yyyy-MM-dd")" /></div>
+        <div class="wd-filter-field"><label for="whWorkshop">Workshop</label>
+            <select id="whWorkshop" name="workshopId"><option value="">ทั้งหมด</option>@foreach (var o in Model.WorkshopOptions) { <option value="@o.Value" selected="@(o.Value == Model.WorkshopId?.ToString())">@o.Text</option> }</select></div>
+        <div class="wd-filter-field"><label for="whShift">กะ</label>
+            <select id="whShift" name="shift"><option value="">ทั้งหมด</option>@foreach (var o in Model.ShiftOptions) { <option value="@o.Value" selected="@(o.Value == Model.Shift)">@o.Text</option> }</select></div>
+        <div class="wd-filter-field"><label for="whStatus">สถานะ</label>
+            <select id="whStatus" name="status">
+                <option value="">ทั้งหมด</option>
+                <option value="@WorkingHoursModel.StatusOk" selected="@(Model.Status == WorkingHoursModel.StatusOk)">ปกติ</option>
+                <option value="@WorkingHoursModel.StatusReview" selected="@(Model.Status == WorkingHoursModel.StatusReview)">ต้องตรวจ</option>
+                <option value="@WorkingHoursModel.StatusCorrected" selected="@(Model.Status == WorkingHoursModel.StatusCorrected)">แก้ไขด้วยมือ</option>
+            </select></div>
+        <button class="wd-apply" type="submit">ค้นหา</button>
+        <a class="wh-export" asp-page-handler="Export" asp-route-from="@Model.From?.ToString("yyyy-MM-dd")" asp-route-to="@Model.To?.ToString("yyyy-MM-dd")" asp-route-workshopId="@Model.WorkshopId" asp-route-shift="@Model.Shift" asp-route-status="@Model.Status">ส่งออก CSV</a>
+    </form>
+
+    <details class="ag-help">
+        <summary>เงื่อนไขการคำนวณ</summary>
+        <ul>
+            <li><strong>ช่วงเวลา</strong>: วันทำงานเริ่ม 07:00 น. (ก่อน 07:00 นับเป็นของเมื่อวาน) วันที่ยังไม่ปิดจะยังไม่มี Total / Indirect / Direct ระบบปิดวันและคำนวณให้ตอน 07:00 และ 19:00 (ต้องเปิดแอปไว้)</li>
+            <li><strong>ชั่วโมงต่อคน</strong>: ทุกคนนับ 100% ของค่ามาตรฐาน (<code>10.67</code>; กลุ่ม Pregnant <code>8.00</code>) ในวันทำงาน วัน OFF นับ 0 ยกเว้นมีการแก้ชั่วโมง/OT ชั่วโมงลา (AL, SL, BL, OL, AB, ML) ไม่นับเป็นชั่วโมงทำงาน</li>
+            <li><strong>Total hours</strong> = ผลรวมชั่วโมงทำงานของทุกคนในวัน/Workshop/กะ นั้น ยกเว้นหัวหน้า (Attendance Leader) ที่เกรด <strong>ต่ำกว่า 56T</strong> นับแค่ <code>50%</code> เกรดว่างหรือไม่มีตัวเลขนำหน้านับ 100%</li>
+            <li><strong>Indirect hours</strong> (กะ A, B, C) = (จำนวนคนกลุ่ม 10.67 × 10.67) + (กลุ่ม 8.41 × 8.41) + (กลุ่ม 7.33 × 7.33) + ชั่วโมงทำงานของหัวหน้าเกรด 56T ขึ้นไป หัวหน้ากะกรอกจำนวนคนทั้งสามกลุ่ม หัวหน้าเกรดต่ำกว่า 56T ไม่นับเป็น Indirect</li>
+            <li><strong>กะ Day</strong>: ทุกคนเป็น Indirect → Indirect = Total, Direct = 0 และไม่ใช้กฎลด 50% ของหัวหน้า</li>
+            <li><strong>Direct hours</strong> = Total − Indirect (คำนวณตอนแสดงผล ไม่ได้เก็บ)</li>
+            <li><strong>ที่มา Indirect</strong>: "คำนวณอัตโนมัติ" ตามสูตรข้างบน หรือ "แก้ไขด้วยมือ" เมื่อ Admin แก้ที่หน้า Attendance (ค่าที่แก้คงอยู่ แม้ Total ถูกคำนวณใหม่)</li>
+            <li><strong>รายการที่ต้องตรวจ</strong> คือแถวที่ (1) Indirect มากกว่า Total ทำให้ Direct ติดลบ หรือ (2) กะ A/B/C ที่หัวหน้ายังไม่ได้กรอกจำนวนคนกลุ่ม Indirect และยังไม่ได้แก้ด้วยมือ (Indirect จึงมีแค่ชั่วโมงหัวหน้า) แถวที่แก้ด้วยมือแล้วและไม่ผิดปกติจะแสดงสถานะ "แก้ไขด้วยมือ"</li>
+        </ul>
+    </details>
+
+    <section class="wd-kpis" aria-label="สรุปชั่วโมง">
+        <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">Σ</span><div><h2>Total hours</h2><strong>@Model.TotalHours.ToString("N2")</strong></div></article>
+        <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">I</span><div><h2>Indirect hours</h2><strong>@Model.IndirectHours.ToString("N2")</strong></div></article>
+        <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">D</span><div><h2>Direct hours</h2><strong class="@(Model.DirectHours < 0 ? "text-danger" : "")">@Model.DirectHours.ToString("N2")</strong></div></article>
+        <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-amber" aria-hidden="true">!</span><div><h2>รายการที่ต้องตรวจ</h2><strong>@Model.ReviewCount</strong></div></article>
+    </section>
+
+    <section class="wd-card wh-table-card">
+        <div class="wd-table-wrap">
+            <table class="wd-table wh-table">
+                <thead><tr><th>วันที่</th><th>Workshop</th><th>กะ</th><th class="text-end">Total</th><th class="text-end">Indirect</th><th class="text-end">Direct</th><th>ที่มา Indirect</th><th>สถานะ</th></tr></thead>
+                <tbody>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr>
+                        <td class="text-nowrap">@WorkingHoursModel.ThaiDayMonth(r.Date)</td>
+                        <td>@r.Workshop</td>
+                        <td>@r.Shift</td>
+                        <td class="text-end">@r.Total.ToString("N2")</td>
+                        <td class="text-end">@r.Indirect.ToString("N2")</td>
+                        <td class="text-end fw-semibold @(r.Direct < 0 ? "text-danger" : "")">@r.Direct.ToString("N2")</td>
+                        <td>@r.SourceText</td>
+                        <td class="text-nowrap">
+                            <span class="wh-badge wh-@r.Status">@WorkingHoursModel.StatusText(r.Status)</span>
+                            <button type="button" class="wh-detail-btn" data-bs-toggle="modal" data-bs-target="#whDetailModal"
+                                    data-title="@WorkingHoursModel.ThaiDayMonth(r.Date) · @r.Workshop · กะ @r.Shift"
+                                    data-total="@r.Total.ToString("N2")" data-indirect="@r.Indirect.ToString("N2")" data-direct="@r.Direct.ToString("N2")"
+                                    data-source="@r.SourceText" data-status="@WorkingHoursModel.StatusText(r.Status)"
+                                    data-direct-count="@r.DirectCount" data-indirect-count="@r.IndirectCount"
+                                    data-i1067="@r.I1067" data-i841="@r.I841" data-i733="@r.I733"
+                                    data-entered="@(string.IsNullOrEmpty(r.EnteredBy) ? "—" : r.EnteredBy)"
+                                    data-calculated="@(r.CalculatedAt is DateTime c ? WorkingHoursModel.ThaiDateTime(c) : "—")"
+                                    data-issues="@string.Join("|", r.Issues)">ดูรายละเอียด</button>
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Rows.Any()) { <tr><td colspan="8" class="text-center text-muted py-4">ไม่พบข้อมูลในช่วงวันที่ที่เลือก (วันที่ยังไม่ปิดจะยังไม่มีชั่วโมง)</td></tr> }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<div class="modal fade" id="whDetailModal" tabindex="-1" aria-labelledby="whDetailTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><h2 class="modal-title fs-5" id="whDetailTitle">รายละเอียด</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body">
+        <div class="wh-issues" id="whIssues" hidden></div>
+        <dl class="wh-dl">
+            <dt>Total hours</dt><dd id="whTotal"></dd>
+            <dt>Indirect hours</dt><dd id="whIndirect"></dd>
+            <dt>Direct hours</dt><dd id="whDirect"></dd>
+            <dt>ที่มา Indirect</dt><dd id="whSource"></dd>
+            <dt>สถานะ</dt><dd id="whStatusText"></dd>
+            <dt>จำนวนคน Direct / Indirect</dt><dd id="whHeadcount"></dd>
+            <dt>Indirect กลุ่ม 10.67 / 8.41 / 7.33</dt><dd id="whBands"></dd>
+            <dt>ผู้กรอกข้อมูล</dt><dd id="whEntered"></dd>
+            <dt>คำนวณล่าสุด</dt><dd id="whCalculated"></dd>
+        </dl>
+        <p class="small text-muted mb-0">Direct = Total − Indirect. แก้ Indirect ด้วยมือได้ที่หน้า Attendance (ตาราง Daily working hours)</p>
+    </div>
+</div></div></div>
+
+@section Scripts {
+<script>
+(() => {
+    const $ = id => document.getElementById(id), modal = $('whDetailModal');
+    modal.addEventListener('show.bs.modal', e => {
+        const d = e.relatedTarget.dataset;
+        $('whDetailTitle').textContent = d.title;
+        $('whTotal').textContent = d.total; $('whIndirect').textContent = d.indirect; $('whDirect').textContent = d.direct;
+        $('whSource').textContent = d.source; $('whStatusText').textContent = d.status;
+        $('whHeadcount').textContent = `${d.directCount} / ${d.indirectCount} คน`;
+        $('whBands').textContent = `${d.i1067} / ${d.i841} / ${d.i733} คน`;
+        $('whEntered').textContent = d.entered; $('whCalculated').textContent = d.calculated;
+        const box = $('whIssues'); box.replaceChildren();
+        (d.issues ? d.issues.split('|') : []).forEach(text => { const p = document.createElement('div'); p.textContent = text; box.append(p); });
+        box.hidden = !box.childElementCount;
+    });
+})();
+</script>
+}

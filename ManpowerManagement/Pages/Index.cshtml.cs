@@ -1,17 +1,48 @@
 using ClosedXML.Excel;
-using ManpowerManagement.Data;
-using ManpowerManagement.Models;
+using ManpowerManagement.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.EntityFrameworkCore;
+
 namespace ManpowerManagement.Pages;
-public class IndexModel(AppDbContext db):PageModel{
- public record LeaveRow(string Name,decimal Hours,decimal Days,decimal Rate);
- public record WorkshopNode(int Id,string Name,int Depth,List<WorkshopNode> Children);
- public List<Workshop> Workshops {get;set;}=[]; public List<WorkshopNode> WorkshopTree {get;set;}=[]; public List<LeaveRow> LeaveRows {get;set;}=[]; public string Month {get;set;}=DateTime.Today.ToString("yyyy-MM"); public int? WorkshopId {get;set;} public string WorkshopLabel {get;set;}="Total Production"; public int Headcount {get;set;} public decimal TotalHours {get;set;} public decimal ConfirmedHoursMtd {get;set;} public decimal ExpectedHoursMtd {get;set;} public decimal AttendanceRatio {get;set;} public decimal AbsentRatio {get;set;} public decimal TurnoverRate {get;set;}
- public async Task OnGetAsync(string? month,int? workshopId)=>await Load(month,workshopId);
- public async Task<IActionResult> OnGetExportAsync(string? month,int? workshopId){await Load(month,workshopId);using var b=new XLWorkbook();var s=b.Worksheets.Add("Dashboard");s.Cell(1,1).Value="Metric";s.Cell(1,2).Value="Value";var a=new[]{("Headcount",Headcount.ToString()),("Approved Working Hours (MTD)",ConfirmedHoursMtd.ToString("N2")),("Expected Hours (MTD, 100% attendance)",ExpectedHoursMtd.ToString("N2")),("Attendance Rate",AttendanceRatio.ToString("N2")+"%"),("Absent Ratio",AbsentRatio.ToString("N2")+"%"),("Turnover Rate",TurnoverRate.ToString("N2")+"%")};for(var i=0;i<a.Length;i++){s.Cell(i+2,1).Value=a[i].Item1;s.Cell(i+2,2).Value=a[i].Item2;}s.Cell(a.Length+3,1).InsertTable(LeaveRows.Select(x=>new{x.Name,x.Hours,x.Days,x.Rate}));s.Columns().AdjustToContents();using var m=new MemoryStream();b.SaveAs(m);return File(m.ToArray(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",$"manpower-{Month}.xlsx");}
- static List<WorkshopNode> BuildTree(List<Workshop> all,int? parentId,int depth){return all.Where(x=>x.ParentId==parentId).OrderBy(x=>x.Name).Select(x=>new WorkshopNode(x.Id,x.Name,depth,BuildTree(all,x.Id,depth+1))).ToList();}
- static void CollectLeafIds(List<Workshop> all,int rootId,HashSet<int> ids){ids.Add(rootId);foreach(var child in all.Where(x=>x.ParentId==rootId))CollectLeafIds(all,child.Id,ids);}
- async Task Load(string? month,int? workshopId){Month=DateTime.TryParse((month??"")+"-01",out var d)?d.ToString("yyyy-MM"):DateTime.Today.ToString("yyyy-MM");WorkshopId=workshopId;var start=DateOnly.Parse(Month+"-01");var end=start.AddMonths(1);var today=DateOnly.FromDateTime(DateTime.Today);var mtdEnd=end<=today?end:(start>today?start:today.AddDays(1));Workshops=await db.Workshops.OrderBy(x=>x.Name).ToListAsync();WorkshopTree=BuildTree(Workshops,null,0);WorkshopLabel=workshopId is int id?Workshops.FirstOrDefault(x=>x.Id==id)?.Name??"Total Production":"Total Production";HashSet<int>? scope=null;if(workshopId is int scopeId){scope=[];CollectLeafIds(Workshops,scopeId,scope);}var q=db.AttendanceEntries.Where(x=>x.BusinessDate>=start&&x.BusinessDate<mtdEnd);if(scope is not null)q=q.Where(x=>scope.Contains(x.WorkshopId));var data=await q.ToListAsync();TotalHours=data.Sum(x=>x.WorkingHours);ConfirmedHoursMtd=data.Where(x=>x.IsConfirmed).Sum(x=>x.WorkingHours);Headcount=await db.Employees.CountAsync(x=>x.EmploymentState==EmploymentState.Active&&(scope==null||scope.Contains(x.CurrentWorkshopId)));var activeEmployees=await db.Employees.Where(x=>x.EmploymentState==EmploymentState.Active&&(scope==null||scope.Contains(x.CurrentWorkshopId))).Select(x=>new{x.CurrentWorkshopId,x.Shift}).ToListAsync();var calendarOverrides=await db.WorkCalendars.Where(x=>x.WorkDate>=start&&x.WorkDate<mtdEnd&&(scope==null||scope.Contains(x.WorkshopId))).ToListAsync();var overrideLookup=calendarOverrides.ToLookup(x=>(x.WorkshopId,x.WorkDate),x=>x.IsWorkingDay);var days=Enumerable.Range(0,mtdEnd.DayNumber-start.DayNumber).Select(i=>start.AddDays(i)).ToList();var expected=activeEmployees.GroupBy(x=>(x.CurrentWorkshopId,x.Shift)).Sum(g=>{var workingDays=days.Count(day=>overrideLookup[(g.Key.CurrentWorkshopId,day)] is var ov&&ov.Any()?ov.First():!Attendance.IndexModel.IsDefaultOffDay(g.Key.Shift,day));return g.Count()*workingDays;});ExpectedHoursMtd=expected*Attendance.IndexModel.StandardHours;AttendanceRatio=ExpectedHoursMtd==0?0:ConfirmedHoursMtd/ExpectedHoursMtd*100m;var leave=data.Sum(x=>x.LeaveHours);AbsentRatio=expected==0?0:leave/Attendance.IndexModel.StandardHours/expected*100m;LeaveRows=Enum.GetValues<LeaveType>().Where(x=>x!=LeaveType.None).Select(t=>{var h=data.Where(x=>x.LeaveType==t).Sum(x=>x.LeaveHours);return new LeaveRow(t.ToString(),h,h/Attendance.IndexModel.StandardHours,expected==0?0:h/Attendance.IndexModel.StandardHours/expected*100m);}).ToList();var resigned=await db.Employees.CountAsync(x=>x.ResignedDate>=start&&x.ResignedDate<end&&(scope==null||scope.Contains(x.CurrentWorkshopId)));var endHead=await db.Employees.CountAsync(x=>x.EmploymentState==EmploymentState.Active&&(scope==null||scope.Contains(x.CurrentWorkshopId)));TurnoverRate=(endHead+resigned+endHead)==0?0:resigned/((endHead+resigned+endHead)/2m)*100m;}
+
+public class IndexModel(WorkforceDashboardService dashboard) : PageModel
+{
+    public WorkforceDashboardService.Report Report { get; private set; } = new();
+
+    public async Task OnGetAsync(string? month, int? workshopId) =>
+        Report = await dashboard.LoadAsync(month, workshopId);
+
+    // Keep the existing download endpoint for integrations; the dashboard has no export button.
+    public async Task<IActionResult> OnGetExportAsync(string? month, int? workshopId)
+    {
+        var report = await dashboard.LoadAsync(month, workshopId);
+        using var book = new XLWorkbook();
+        var sheet = book.Worksheets.Add("Dashboard");
+        sheet.Cell(1, 1).Value = "Metric";
+        sheet.Cell(1, 2).Value = "Value";
+        var metrics = new (string Name, string Value)[]
+        {
+            ("Active headcount", report.Headcount.ToString("N0")),
+            ("Present person-days", report.PresentPersonDays.ToString("N0")),
+            ("Scheduled person-days", report.ScheduledPersonDays.ToString("N0")),
+            ("Attendance rate (headcount)", report.AttendanceRate.ToString("N2") + "%"),
+            ("Absence rate", report.AbsenceRate.ToString("N2") + "%"),
+            ("Turnover rate", report.TurnoverRate.ToString("N2") + "%")
+        };
+        for (var i = 0; i < metrics.Length; i++)
+        {
+            sheet.Cell(i + 2, 1).Value = metrics[i].Name;
+            sheet.Cell(i + 2, 2).Value = metrics[i].Value;
+        }
+        sheet.Cell(metrics.Length + 3, 1).InsertTable(report.LeaveRows.Select(x => new
+        {
+            LeaveType = x.Name, x.Hours, SharePercent = x.Rate
+        }));
+        sheet.Columns().AdjustToContents();
+        using var stream = new MemoryStream();
+        book.SaveAs(stream);
+        return File(stream.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"manpower-{report.Month}.xlsx");
+    }
 }

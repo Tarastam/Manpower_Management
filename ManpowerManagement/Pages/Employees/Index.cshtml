@@ -3,29 +3,40 @@
 @{
     ViewData["Title"] = "Employees";
     var shiftOptionsHtml = string.Concat(new[] { "A", "B", "C", "Day" }.Select(shift => $"<option value=\"{shift}\">{shift}</option>"));
-    var stateOptionsHtml = string.Concat(Enum.GetNames<ManpowerManagement.Models.EmploymentState>().Select(state => $"<option value=\"{state}\">{state}</option>"));
+    var newOptionsHtml = "<option value=\"No\">No</option><option value=\"Yes\">Yes</option>";
     var workshopOptionsHtml = string.Concat(Model.WorkshopOptions.Select(ws => $"<option value=\"{ws.Value}\">{ws.Text}</option>"));
+    var dayWorkshopItems = Model.DayWorkshopOptions.Select(o => new SelectListItem(o.Text, o.Value)).ToList();
+    if (Model.Input.Shift == "Day" && Model.Input.WorkshopId != 0 && dayWorkshopItems.All(o => o.Value != Model.Input.WorkshopId.ToString()))
+    {
+        var currentName = Model.WorkshopOptions.FirstOrDefault(o => o.Value == Model.Input.WorkshopId.ToString())?.Text;
+        if (currentName is not null) dayWorkshopItems.Add(new SelectListItem(currentName, Model.Input.WorkshopId.ToString()));
+    }
+    foreach (var o in dayWorkshopItems.Concat(Model.WorkshopOptions)) o.Selected = Model.Input.WorkshopId != 0 && o.Value == Model.Input.WorkshopId.ToString();
     var groupOptionsHtml = string.Concat(Model.GroupOptions.Select(g => $"<option value=\"{g.Text}\">{g.Text}</option>"));
 }
 <div class="d-flex justify-content-between align-items-center"><div><h1 class="h3 mb-0">Employees</h1></div><div class="d-flex gap-2"><a class="btn btn-outline-secondary" asp-page-handler="ExportCsv">Export CSV</a><button class="btn btn-primary" data-bs-toggle="collapse" data-bs-target="#employeeForm">Add employee</button></div></div>
+<p class="text-muted small mt-2 mb-0">@Model.TagNote@if (Model.TagNeedsCheckIn) { <text> <a asp-page="/Attendance/CheckIn" asp-route-returnPage="Employees">Leader check-in</a></text> }</p>
 @if (Model.Message is not null) { <div class="alert alert-success mt-3">@Model.Message</div> }
 @if (Model.Error is not null) { <div class="alert alert-danger mt-3">@Model.Error</div> }
 <div id="employeeForm" class="collapse @(Model.Input.Id is not null || Model.Error is not null ? "show" : "") card card-body mt-3">
 <ul class="nav nav-tabs mb-3 employee-tabs"><li class="nav-item"><button type="button" class="nav-link active" data-bs-toggle="tab" data-bs-target="#paste">Paste from Excel</button></li><li class="nav-item"><button type="button" class="nav-link" data-bs-toggle="tab" data-bs-target="#single">Add / edit one</button></li></ul>
-<div class="tab-content"><div id="paste" class="tab-pane fade show active"><form method="post" asp-page-handler="Batch" id="batchEmployeeForm"><div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-2"><div><div class="form-label fw-semibold mb-0">Employee grid</div><div class="form-text">Click a cell and paste one Excel column (many rows), then paste the next column. You can also paste a complete range.</div></div><div class="d-flex flex-wrap align-items-end gap-2 employee-grid-controls"><div><label class="form-label mb-1" asp-for="BatchWorkshop">Workshop</label><select class="form-select form-select-sm" asp-for="BatchWorkshop" required><option value="">Select workshop</option>@foreach (var name in ManpowerManagement.Data.SeedData.EmployeeWorkshopNames) { <option>@name</option> }</select></div><div><label class="form-label mb-1" asp-for="BatchShift">Shift</label><select class="form-select form-select-sm" asp-for="BatchShift" required><option value="">Select shift</option><option>A</option><option>B</option><option>C</option><option>Day</option></select></div></div></div><div class="form-text mb-2">Workshop and Shift above apply to every row in this save.</div><div class="table-responsive employee-paste-grid-wrap"><table class="table table-bordered table-sm mb-0 employee-paste-grid" id="employeeGrid"><thead><tr><th scope="col">#</th><th scope="col">Emp ID</th><th scope="col">First Name</th><th scope="col">Last Name</th><th scope="col">Job Grade</th><th scope="col">Process</th><th scope="col">Accommodation</th><th scope="col">Tel. No</th><th scope="col">Status</th><th scope="col">Special Groups</th><th scope="col">Remark</th></tr></thead><tbody>@for (var i = 0; i < Model.BatchRows.Count; i++) { <tr><th scope="row"><button type="button" class="btn btn-sm btn-outline-danger employee-row-remove" aria-label="Delete row @(i + 1)" title="Delete row">&minus;</button><span class="employee-row-number">@(i + 1)</span></th><td><input class="form-control form-control-sm" asp-for="BatchRows[i].EmployeeId" data-row="@i" data-col="0" aria-label="Emp ID, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].FirstName" data-row="@i" data-col="1" aria-label="First Name, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].LastName" data-row="@i" data-col="2" aria-label="Last Name, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].JobGrade" data-row="@i" data-col="3" aria-label="Job Grade, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Process" data-row="@i" data-col="4" aria-label="Process, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Accommodation" data-row="@i" data-col="5" aria-label="Accommodation, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].TelephoneNumber" data-row="@i" data-col="6" aria-label="Tel. No, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Status" data-row="@i" data-col="7" aria-label="Status, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Groups" data-row="@i" data-col="8" aria-label="Special Groups, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Remark" data-row="@i" data-col="9" aria-label="Remark, row @(i + 1)" /></td></tr> }</tbody></table></div><div class="form-text mt-2">Required: Emp ID, First Name, and a Workshop/Shift selected above. Status is Active or Resigned. Special Groups: comma-separated names matching the Special Groups page.</div><button class="btn btn-success mt-3">Save employee rows</button></form></div>
+<div class="tab-content"><div id="paste" class="tab-pane fade show active"><form method="post" asp-page-handler="Batch" id="batchEmployeeForm"><div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-2"><div><div class="form-label fw-semibold mb-0">Employee grid</div><div class="form-text">Click a cell and paste one Excel column (many rows), then paste the next column. You can also paste a complete range.</div></div><div class="d-flex flex-wrap align-items-end gap-2 employee-grid-controls"><div><label class="form-label mb-1" asp-for="BatchWorkshop">Workshop</label><select class="form-select form-select-sm" asp-for="BatchWorkshop" required><option value="">Select workshop</option>@foreach (var name in ManpowerManagement.Data.SeedData.EmployeeWorkshopNames) { <option>@name</option> }</select></div><div><label class="form-label mb-1" asp-for="BatchShift">Shift</label><select class="form-select form-select-sm" asp-for="BatchShift" required><option value="">Select shift</option><option>A</option><option>B</option><option>C</option><option>Day</option></select></div><div><label class="form-label mb-1" for="BatchIsNew">New Employee?</label><select class="form-select form-select-sm" id="BatchIsNew" name="BatchIsNew" required><option value="">Select Yes / No</option><option value="yes" selected="@(Model.BatchIsNew == "yes")">Yes</option><option value="no" selected="@(Model.BatchIsNew == "no")">No</option></select></div></div></div><div class="form-text mb-2">Workshop, Shift and New Employee above apply to every employee created by this save (people who already exist keep their current tag). Choose Yes only for genuinely new hires, not for people added because they were missed or transferred from another department; Yes needs a Start Date on every row.</div><div class="table-responsive employee-paste-grid-wrap"><table class="table table-bordered table-sm mb-0 employee-paste-grid" id="employeeGrid"><thead><tr><th scope="col">#</th><th scope="col">Emp ID</th><th scope="col">First Name</th><th scope="col">Last Name</th><th scope="col">Job Grade</th><th scope="col">Process</th><th scope="col">Accommodation</th><th scope="col">Tel. No</th><th scope="col">Status</th><th scope="col">Special Groups</th><th scope="col">Remark</th><th scope="col">Start Date</th></tr></thead><tbody>@for (var i = 0; i < Model.BatchRows.Count; i++) { <tr><th scope="row"><button type="button" class="btn btn-sm btn-outline-danger employee-row-remove" aria-label="Delete row @(i + 1)" title="Delete row">&minus;</button><span class="employee-row-number">@(i + 1)</span></th><td><input class="form-control form-control-sm" asp-for="BatchRows[i].EmployeeId" data-row="@i" data-col="0" aria-label="Emp ID, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].FirstName" data-row="@i" data-col="1" aria-label="First Name, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].LastName" data-row="@i" data-col="2" aria-label="Last Name, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].JobGrade" data-row="@i" data-col="3" aria-label="Job Grade, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Process" data-row="@i" data-col="4" aria-label="Process, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Accommodation" data-row="@i" data-col="5" aria-label="Accommodation, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].TelephoneNumber" data-row="@i" data-col="6" aria-label="Tel. No, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Status" data-row="@i" data-col="7" aria-label="Status, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Groups" data-row="@i" data-col="8" aria-label="Special Groups, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].Remark" data-row="@i" data-col="9" aria-label="Remark, row @(i + 1)" /></td><td><input class="form-control form-control-sm" asp-for="BatchRows[i].StartDate" data-row="@i" data-col="10" aria-label="Start Date, row @(i + 1)" placeholder="yyyy-MM-dd" /></td></tr> }</tbody></table></div><div class="form-text mt-2">Required: Emp ID, First Name, and a Workshop/Shift selected above. Status can be left blank (or Active): Resigned is set only by an approved Resignation Ticket. Special Groups: comma-separated names matching the Special Groups page. Start Date is optional (yyyy-MM-dd or dd/MM/yyyy): empty means today for new employees and no change for existing ones.</div><button class="btn btn-success mt-3">Save employee rows</button></form></div>
 <div id="single" class="tab-pane fade">
     <form method="post" class="row g-2">
         <input type="hidden" asp-for="Input.Id" />
         <div class="col-md-2"><label class="form-label" asp-for="Input.EmployeeId">Emp ID</label><input class="form-control" asp-for="Input.EmployeeId" required /></div>
         <div class="col-md-3"><label class="form-label" asp-for="Input.FullName">Name</label><input class="form-control" asp-for="Input.FullName" required /></div>
         <div class="col-md-2"><label class="form-label" asp-for="Input.JobGrade">Job Grade</label><input class="form-control" asp-for="Input.JobGrade" /></div>
-        <div class="col-md-2"><label class="form-label" asp-for="Input.Process">Process</label><input class="form-control" asp-for="Input.Process" /></div>
-        <div class="col-md-3"><label class="form-label" asp-for="Input.WorkshopId">Workshop</label><select class="form-select" asp-for="Input.WorkshopId" asp-items="Model.WorkshopOptions" required><option value="">Select workshop</option></select></div>
         <div class="col-md-2"><label class="form-label" asp-for="Input.Shift">Shift</label><select class="form-select" asp-for="Input.Shift" required><option>A</option><option>B</option><option>C</option><option>Day</option></select></div>
+        <div class="col-md-2 single-nonday"><label class="form-label" asp-for="Input.Process">Process</label><input class="form-control" asp-for="Input.Process" /></div>
+        <div class="col-md-3 single-nonday"><label class="form-label" for="workshopNonDay">Workshop</label><select class="form-select" id="workshopNonDay" name="Input.WorkshopId" asp-items="Model.WorkshopOptions" required><option value="">Select workshop</option></select></div>
+        <div class="col-md-3 single-day d-none"><label class="form-label" for="workshopDay">Workshop</label><select class="form-select" id="workshopDay" name="Input.WorkshopId" asp-items="dayWorkshopItems" required disabled><option value="">Select workshop</option></select></div>
         <div class="col-md-3"><label class="form-label" asp-for="Input.Accommodation">Accommodation</label><input class="form-control" asp-for="Input.Accommodation" /></div>
         <div class="col-md-2"><label class="form-label" asp-for="Input.TelephoneNumber">Tel. No</label><input class="form-control" asp-for="Input.TelephoneNumber" /></div>
-        <div class="col-md-2"><label class="form-label" asp-for="Input.EmploymentState">Status</label><select class="form-select" asp-for="Input.EmploymentState" asp-items="Html.GetEnumSelectList<ManpowerManagement.Models.EmploymentState>()"></select></div>
-        <div class="col-md-3"><label class="form-label" asp-for="Input.GroupIds">Special Groups</label><select class="form-select" asp-for="Input.GroupIds" asp-items="Model.GroupOptions" multiple size="3"></select></div>
+        <div class="col-md-2"><label class="form-label" for="Input_StatusDisplay">Status</label><input class="form-control" id="Input_StatusDisplay" value="@Model.Input.EmploymentState" readonly disabled /><div class="form-text">Set by resignation ticket</div></div>
+        <div class="col-md-3 single-nonday"><label class="form-label" asp-for="Input.GroupIds">Special Groups</label><select class="form-select" asp-for="Input.GroupIds" asp-items="Model.GroupOptions" multiple size="3"></select></div>
+        <div class="col-md-2"><label class="form-label" asp-for="Input.StartDate">Start Date</label><input class="form-control" type="date" asp-for="Input.StartDate" /></div>
+        <div class="col-md-2"><label class="form-label" for="Input_IsNewEmployee">New Employee?</label><select class="form-select" id="Input_IsNewEmployee" name="Input.IsNewEmployee" required><option value="">Select Yes / No</option><option value="true" selected="@(Model.Input.IsNewEmployee == true)">Yes</option><option value="false" selected="@(Model.Input.IsNewEmployee == false)">No</option></select><div class="form-text">Yes = a genuinely new hire (monitored)</div></div>
         <div class="col-md-4"><label class="form-label" asp-for="Input.Remark">Remark</label><input class="form-control" asp-for="Input.Remark" /></div>
         <div class="col-md-2 align-self-end"><button class="btn btn-success w-100">Save</button></div>
     </form>
@@ -36,7 +47,9 @@
         <div><label class="form-label mb-1 small">Search</label><input type="search" class="form-control form-control-sm" id="filterSearch" placeholder="Search Emp ID, Name, ..." style="min-width: 14rem;" /></div>
         <div><label class="form-label mb-1 small">Workshop</label><select class="form-select form-select-sm" id="filterWorkshop"><option value="">All workshops</option>@foreach (var name in Model.Employees.Select(x => x.CurrentWorkshop?.Name).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x)) { <option value="@name">@name</option> }</select></div>
         <div><label class="form-label mb-1 small">Shift</label><select class="form-select form-select-sm" id="filterShift"><option value="">All shifts</option>@foreach (var shift in Model.Employees.Select(x => x.Shift).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x)) { <option value="@shift">@shift</option> }</select></div>
+        <div><label class="form-label mb-1 small">Job Grade</label><select class="form-select form-select-sm" id="filterGrade"><option value="">All grades</option>@foreach (var grade in Model.Employees.Select(x => x.JobGrade).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) { <option value="@grade">@grade</option> }</select></div>
         <div><label class="form-label mb-1 small">Process</label><select class="form-select form-select-sm" id="filterProcess"><option value="">All processes</option>@foreach (var process in Model.Employees.Select(x => x.Process).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x)) { <option value="@process">@process</option> }</select></div>
+        <div><label class="form-label mb-1 small">New Employee</label><select class="form-select form-select-sm" id="filterNew"><option value="">All</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
         <div><label class="form-label mb-1 small">Special Group</label><select class="form-select form-select-sm" id="filterGroup"><option value="">All groups</option>@foreach (var group in Model.Employees.SelectMany(x => x.SpecialGroups).Select(x => x.SpecialGroup!.Name).Distinct().OrderBy(x => x)) { <option value="@group">@group</option> }</select></div>
     </div>
     <div class="d-flex gap-2">
@@ -55,15 +68,17 @@
     <th class="sortable" data-sort="text" data-col="3">Process <span class="sort-arrow"></span></th>
     <th class="sortable" data-sort="text" data-col="4">Workshop <span class="sort-arrow"></span></th>
     <th class="sortable" data-sort="text" data-col="5">Shift <span class="sort-arrow"></span></th>
-    <th class="sortable" data-sort="text" data-col="6">Accommodation <span class="sort-arrow"></span></th>
-    <th class="sortable" data-sort="text" data-col="7">Tel. No <span class="sort-arrow"></span></th>
-    <th class="sortable" data-sort="text" data-col="8">Status <span class="sort-arrow"></span></th>
+    <th class="sortable" data-sort="text" data-col="6">Start Date <span class="sort-arrow"></span></th>
+    <th class="sortable" data-sort="text" data-col="7">New Employee <span class="sort-arrow"></span></th>
+    <th class="sortable" data-sort="text" data-col="8">Accommodation <span class="sort-arrow"></span></th>
+    <th class="sortable" data-sort="text" data-col="9">Tel. No <span class="sort-arrow"></span></th>
+    <th class="sortable" data-sort="text" data-col="10">Status <span class="sort-arrow"></span></th>
     <th>Special Groups <span class="text-muted fw-normal small">(ctrl/cmd+click to select or clear)</span></th>
-    <th class="sortable" data-sort="text" data-col="9">Remark <span class="sort-arrow"></span></th>
+    <th class="sortable" data-sort="text" data-col="12">Remark <span class="sort-arrow"></span></th>
     <th></th>
 </tr></thead><tbody>
 @for (var i = 0; i < Model.Employees.Count; i++) { var e = Model.Employees[i];
-    <tr data-workshop="@e.CurrentWorkshop?.Name" data-shift="@e.Shift" data-process="@e.Process" data-groups="@string.Join(",", e.SpecialGroups.Select(x => x.SpecialGroup!.Name))" data-row="@i" data-id="@e.Id">
+    <tr data-workshop="@e.CurrentWorkshop?.Name" data-shift="@e.Shift" data-grade="@e.JobGrade" data-process="@e.Process" data-new="@(e.IsNewEmployee ? "Yes" : "No")" data-groups="@string.Join(",", e.SpecialGroups.Select(x => x.SpecialGroup!.Name))" data-row="@i" data-id="@e.Id">
         <td class="select-col d-none" style="@(Model.CanDelete ? "" : "display:none")"><input type="checkbox" class="row-select-checkbox" value="@e.Id" aria-label="Select @e.EmployeeId" /></td>
         <td data-field="EmployeeId" data-value="@e.EmployeeId"><input type="hidden" name="GridRows[@i].Id" value="@e.Id" /><span class="view-text">@e.EmployeeId</span></td>
         <td data-field="FullName" data-value="@e.FullName"><span class="view-text">@e.FullName</span></td>
@@ -71,6 +86,8 @@
         <td data-field="Process" data-value="@e.Process"><span class="view-text">@e.Process</span></td>
         <td data-field="WorkshopId" data-value="@e.CurrentWorkshop?.Name" data-selected="@e.CurrentWorkshopId"><span class="view-text">@e.CurrentWorkshop?.Name</span></td>
         <td data-field="Shift" data-value="@e.Shift"><span class="view-text">@e.Shift</span></td>
+        <td data-field="StartDate" data-value="@e.StartDate.ToString("yyyy-MM-dd")"><span class="view-text">@e.StartDate.ToString("yyyy-MM-dd")</span></td>
+        <td data-field="IsNewEmployee" data-value="@(e.IsNewEmployee ? "Yes" : "No")"><span class="view-text">@(e.IsNewEmployee ? "Yes" : "No")</span></td>
         <td data-field="Accommodation" data-value="@e.Accommodation"><span class="view-text">@e.Accommodation</span></td>
         <td data-field="TelephoneNumber" data-value="@e.TelephoneNumber"><span class="view-text">@e.TelephoneNumber</span></td>
         <td data-field="EmploymentState" data-value="@e.EmploymentState"><span class="view-text">@e.EmploymentState</span></td>
@@ -83,7 +100,7 @@
 <form method="post" asp-page-handler="BulkDelete" id="employeeBulkDeleteForm"></form>
 <template id="workshopOptionsTemplate">@Html.Raw(workshopOptionsHtml)</template>
 <template id="shiftOptionsTemplate">@Html.Raw(shiftOptionsHtml)</template>
-<template id="stateOptionsTemplate">@Html.Raw(stateOptionsHtml)</template>
+<template id="newOptionsTemplate">@Html.Raw(newOptionsHtml)</template>
 <template id="groupOptionsTemplate">@Html.Raw(groupOptionsHtml)</template>
 
 @section Scripts {
@@ -92,6 +109,18 @@
     if (document.querySelector('#Input_Id')?.value || document.querySelector('#Input_EmployeeId')?.value) {
         bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#single"]')).show();
     }
+    const singleShift = document.querySelector('#Input_Shift');
+    function applySingleShift() {
+        const day = singleShift.value === 'Day';
+        document.querySelectorAll('#single .single-nonday').forEach(el => { el.classList.toggle('d-none', day); el.querySelectorAll('input,select').forEach(c => c.disabled = day); });
+        document.querySelectorAll('#single .single-day').forEach(el => { el.classList.toggle('d-none', !day); el.querySelectorAll('input,select').forEach(c => c.disabled = !day); });
+    }
+    const singleNew = document.querySelector('#Input_IsNewEmployee'), singleStart = document.querySelector('#Input_StartDate');
+    function applySingleNew() { singleStart.required = singleNew.value === 'true'; }
+    singleNew.addEventListener('change', applySingleNew);
+    applySingleNew();
+    singleShift.addEventListener('change', applySingleShift);
+    applySingleShift();
     const deleteForm = document.querySelector('#employeeDeleteForm');
     const deleteFormId = document.querySelector('#employeeDeleteFormId');
     document.querySelectorAll('.employee-delete-btn').forEach(btn => btn.addEventListener('click', event => {
@@ -126,18 +155,20 @@
         const filterWorkshop = document.querySelector('#filterWorkshop');
         const filterShift = document.querySelector('#filterShift');
         const filterProcess = document.querySelector('#filterProcess');
+        const filterGrade = document.querySelector('#filterGrade');
         const filterGroup = document.querySelector('#filterGroup');
+        const filterNew = document.querySelector('#filterNew');
         function applyFilters() {
-            const q = filterSearch.value.trim().toLowerCase(), ws = filterWorkshop.value, sh = filterShift.value, pr = filterProcess.value, gr = filterGroup.value;
+            const q = filterSearch.value.trim().toLowerCase(), ws = filterWorkshop.value, sh = filterShift.value, pr = filterProcess.value, jg = filterGrade.value, gr = filterGroup.value, nw = filterNew.value;
             [...listBody.rows].forEach(row => {
                 const text = row.textContent.toLowerCase();
                 const groups = (row.dataset.groups || '').split(',');
-                const match = (!q || text.includes(q)) && (!ws || row.dataset.workshop === ws) && (!sh || row.dataset.shift === sh) && (!pr || row.dataset.process === pr) && (!gr || groups.includes(gr));
+                const match = (!q || text.includes(q)) && (!ws || row.dataset.workshop === ws) && (!sh || row.dataset.shift === sh) && (!pr || row.dataset.process === pr) && (!jg || row.dataset.grade === jg) && (!gr || groups.includes(gr)) && (!nw || row.dataset.new === nw);
                 row.classList.toggle('d-none', !match);
             });
         }
         filterSearch.addEventListener('input', applyFilters);
-        [filterWorkshop, filterShift, filterProcess, filterGroup].forEach(el => el.addEventListener('change', applyFilters));
+        [filterWorkshop, filterShift, filterGrade, filterProcess, filterGroup, filterNew].forEach(el => el.addEventListener('change', applyFilters));
 
         // Grid edit mode
         const editToggle = document.querySelector('#gridEditToggle');
@@ -152,7 +183,7 @@
         const selectOptionsHtml = {
             WorkshopId: document.querySelector('#workshopOptionsTemplate').innerHTML,
             Shift: document.querySelector('#shiftOptionsTemplate').innerHTML,
-            EmploymentState: document.querySelector('#stateOptionsTemplate').innerHTML,
+            IsNewEmployee: document.querySelector('#newOptionsTemplate').innerHTML,
         };
         const multiSelectOptionsHtml = {
             Groups: document.querySelector('#groupOptionsTemplate').innerHTML,
@@ -165,6 +196,7 @@
                 const rowIndex = row.dataset.row;
                 row.querySelectorAll('td[data-field]').forEach(td => {
                     const field = td.dataset.field;
+                    if (field === 'EmploymentState') return; // Status is read-only: only a resignation ticket changes it.
                     const name = `GridRows[${rowIndex}].${field}`;
                     let input;
                     if (field in multiSelectOptionsHtml) {
@@ -224,9 +256,9 @@
             ids.forEach(id => { const input = document.createElement('input'); input.type = 'hidden'; input.name = 'selectedIds'; input.value = id; form.appendChild(input); });
         });
     }
-    const columns = ['Emp ID', 'First Name', 'Last Name', 'Job Grade', 'Process', 'Accommodation', 'Tel. No', 'Status', 'Special Groups', 'Remark'];
+    const columns = ['Emp ID', 'First Name', 'Last Name', 'Job Grade', 'Process', 'Accommodation', 'Tel. No', 'Status', 'Special Groups', 'Remark', 'Start Date'];
     const gridBody = document.querySelector('#employeeGrid tbody');
-    const fieldNames = ['EmployeeId', 'FirstName', 'LastName', 'JobGrade', 'Process', 'Accommodation', 'TelephoneNumber', 'Status', 'Groups', 'Remark'];
+    const fieldNames = ['EmployeeId', 'FirstName', 'LastName', 'JobGrade', 'Process', 'Accommodation', 'TelephoneNumber', 'Status', 'Groups', 'Remark', 'StartDate'];
     function rowHtml(index) { return `<th scope="row"><button type="button" class="btn btn-sm btn-outline-danger employee-row-remove" aria-label="Delete row ${index + 1}" title="Delete row">&minus;</button><span class="employee-row-number">${index + 1}</span></th>${columns.map((column, col) => `<td><input type="text" class="form-control form-control-sm" name="BatchRows[${index}].${fieldNames[col]}" data-row="${index}" data-col="${col}" aria-label="${column}, row ${index + 1}"${col === 7 ? ' value="Active"' : ''}></td>`).join('')}`; }
     function addRows(count) { const start = gridBody.rows.length; for (let row = 0; row < count; row++) { const tr = document.createElement('tr'); tr.innerHTML = rowHtml(start + row); gridBody.appendChild(tr); } }
     function reindexRows() { [...gridBody.rows].forEach((tr, row) => { tr.querySelector('.employee-row-number').textContent = row + 1; const removeButton = tr.querySelector('.employee-row-remove'); removeButton.setAttribute('aria-label', `Delete row ${row + 1}`); tr.querySelectorAll('input[data-col]').forEach(input => { const col = Number(input.dataset.col); input.name = `BatchRows[${row}].${fieldNames[col]}`; input.dataset.row = row; input.setAttribute('aria-label', `${columns[col]}, row ${row + 1}`); }); }); }
@@ -243,7 +275,7 @@
     .employee-tabs .nav-link { color: #374151 !important; font-weight: 600; }
     .employee-tabs .nav-link:hover, .employee-tabs .nav-link:focus { color: #312e81 !important; }
     .employee-tabs .nav-link.active { color: #4338ca !important; }
-    .employee-paste-grid { min-width: 1370px; }
+    .employee-paste-grid { min-width: 1520px; }
     .employee-paste-grid thead th { position: sticky; top: 0; z-index: 3; background-color: #e7eaff !important; color: #17213b; white-space: nowrap; }
     .employee-paste-grid th[scope="row"] { position: sticky; left: 0; z-index: 2; background-color: #fff; text-align: center; min-width: 5.5rem; }
     .employee-paste-grid td { padding: .15rem; min-width: 9rem; }
