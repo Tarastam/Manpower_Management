@@ -26,11 +26,16 @@
     }
 
     <div class="ag-monthbar pregnant-monthbar">
-        <a class="btn ag-icon-btn" asp-route-startMonth="@previousMonth" asp-route-endMonth="@previousMonth" aria-label="Previous month">&#9664;</a>
+        <a class="btn ag-icon-btn" asp-route-startMonth="@previousMonth" asp-route-endMonth="@previousMonth" asp-route-workshopId="@Model.WorkshopId" aria-label="Previous month">&#9664;</a>
         <h2>@firstDate.ToString("MMMM yyyy")</h2>
-        <a class="btn ag-icon-btn" asp-route-startMonth="@nextMonth" asp-route-endMonth="@nextMonth" aria-label="Next month">&#9654;</a>
+        <a class="btn ag-icon-btn" asp-route-startMonth="@nextMonth" asp-route-endMonth="@nextMonth" asp-route-workshopId="@Model.WorkshopId" aria-label="Next month">&#9654;</a>
         <span class="ag-monthbar-meta">@Model.GridRows.Count employees · Monday–Friday schedule · 8.00 hrs/day</span>
         <form class="pregnant-month-picker ms-auto" id="attendanceFilters" method="get">
+            <label class="visually-hidden" for="workshopFilter">Select workshop</label>
+            <select id="workshopFilter" class="form-select" name="WorkshopId" aria-label="Select workshop" onchange="this.form.requestSubmit()">
+                <option value="">All workshops</option>
+                @foreach (var option in Model.WorkshopOptions) { <option value="@option.Value" selected="@(option.Value == Model.WorkshopId?.ToString())">@option.Text</option> }
+            </select>
             <label class="visually-hidden" for="startMonth">Select month</label>
             <input id="startMonth" class="form-control" type="month" asp-for="StartMonth" aria-label="Select month" />
             <input id="endMonth" type="hidden" name="EndMonth" value="@Model.StartMonth" />
@@ -51,11 +56,13 @@
                         <label class="visually-hidden" for="attendanceSearch">Search employee</label><input id="attendanceSearch" type="search" placeholder="Search employee" autocomplete="off" />
                     </div>
                 </div>
-                <div class="ag-fill" role="group" aria-label="Attendance shortcuts"><span class="ag-fill-label">Leave:</span><button type="button" class="ag-chip lt-1" data-leave-shortcut="1" title="Annual leave">AL</button><button type="button" class="ag-chip lt-2" data-leave-shortcut="2" title="Sick leave">SL</button><button type="button" class="ag-chip lt-3" data-leave-shortcut="3" title="Business leave">BL</button><button type="button" class="ag-chip lt-4" data-leave-shortcut="4" title="Other leave">OL</button><button type="button" class="ag-chip lt-5" data-leave-shortcut="5" title="Absent">AB</button><button type="button" class="ag-chip lt-6" id="motherLeaveOpen">ML · Date range</button></div>
+                <div class="ag-fill" role="group" aria-label="Attendance shortcuts"><span class="ag-fill-label">Leave:</span><button type="button" class="ag-chip lt-1" data-leave-shortcut="1" title="Annual leave">AL</button><button type="button" class="ag-chip lt-2" data-leave-shortcut="2" title="Sick leave">SL</button><button type="button" class="ag-chip lt-3" data-leave-shortcut="3" title="Business leave">BL</button><button type="button" class="ag-chip lt-4" data-leave-shortcut="4" title="Other leave">OL</button><button type="button" class="ag-chip lt-5" data-leave-shortcut="5" title="Absent">AB</button><button type="button" class="ag-chip lt-6" id="motherLeaveOpen">ML · Date range</button><button type="button" class="ag-chip" id="pregnantTransfer" title="Record work in another workshop on the selected day">Transfer…</button></div>
+                <button type="button" class="btn ag-tool-btn" id="pregnantNote" title="Add or edit a note on the selected day">Note…</button>
                 <button class="btn ag-tool-btn" id="attendanceToday" type="button">Today</button>
             </div>
 
-            <details class="ag-help"><summary>How to key attendance</summary><p class="mb-0 mt-2">Click a day to edit hours or leave. Use <strong>ML · Date range</strong> to choose maternity leave dates across any month. Saturday and Sunday remain OFF.</p></details>
+            <details class="ag-help"><summary>How to key attendance</summary><p class="mb-0 mt-2">Click a day to edit hours or leave. Use <strong>ML · Date range</strong> to choose maternity leave dates across any month. Saturday and Sunday remain OFF.</p>
+            <p class="mb-0 mt-2"><strong>Transfer</strong> records that the day was worked in another workshop (the cell turns green with a T). <strong>Notes</strong> record a reason such as a leave booking or a transfer; cells with a note show a red corner, hover to read it. After clicking a day, <strong>Transfer…</strong> and <strong>Note…</strong> reopen that day to edit them.</p></details>
 
             <div class="attendance-grid-wrap ag-wrap" id="attendanceGridWrap" tabindex="0" aria-label="Attendance calendar table. Scroll horizontally to view all dates.">
                 <table class="attendance-grid pregnant-grid">
@@ -88,7 +95,7 @@
                                 @for (var j = week.StartIndex; j < week.StartIndex + week.Count; j++)
                                 {
                                     var cell = row.Cells[j]; var isFuture = cell.BusinessDate > today; var isToday = cell.BusinessDate == today; var addWeeklyTotal = cell.BusinessDate.DayOfWeek == DayOfWeek.Saturday || (j == week.StartIndex + week.Count - 1 && !hasSaturday); var leave = cell.LeaveType != LeaveType.None; var leaveClass = cell.LeaveType switch { LeaveType.AnnualLeave => "annual", LeaveType.SickLeave => "sick", LeaveType.BusinessLeave => "business", LeaveType.OtherLeave => "other", LeaveType.Absent => "absent", LeaveType.MotherLeave => "mother", _ => "" }; var customHours = !cell.IsOffDay && !leave && cell.WorkingHours != ManpowerManagement.Pages.Attendance.PregnantModel.StandardHours; var state = cell.IsOffDay ? $"off {(cell.WorkingHours > 0 ? "has-ot" : "")}" : leave ? $"leave leave-{leaveClass}" : customHours ? "hours" : "";
-                                    <td class="calendar-cell @(isFuture ? "future" : "past") @(isToday ? "is-today" : "") @state" data-date="@cell.BusinessDate.ToString("yyyy-MM-dd")" data-off="@cell.IsOffDay.ToString().ToLowerInvariant()" data-confirmed="@cell.IsConfirmed.ToString().ToLowerInvariant()" data-employee-id="@row.EmployeeId" data-original-hours="@cell.WorkingHours" data-original-leave-type="@((int)cell.LeaveType)" data-original-leave-hours="@cell.LeaveHours">
+                                    <td class="calendar-cell @(isFuture ? "future" : "past") @(isToday ? "is-today" : "") @state @(cell.WorkshopId != Model.HomeWorkshops[row.EmployeeId] ? "transfer" : "") @(cell.Note != "" ? "has-note" : "")" data-workshop="@cell.WorkshopId" data-home-workshop="@Model.HomeWorkshops[row.EmployeeId]" data-note="@cell.Note" data-date="@cell.BusinessDate.ToString("yyyy-MM-dd")" data-off="@cell.IsOffDay.ToString().ToLowerInvariant()" data-confirmed="@cell.IsConfirmed.ToString().ToLowerInvariant()" data-employee-id="@row.EmployeeId" data-original-hours="@cell.WorkingHours" data-original-leave-type="@((int)cell.LeaveType)" data-original-leave-hours="@cell.LeaveHours">
                                         <input type="hidden" class="cell-date" name="GridRows[@i].Cells[@j].BusinessDate" value="@cell.BusinessDate" /><input type="hidden" class="cell-hours" name="GridRows[@i].Cells[@j].WorkingHours" value="@cell.WorkingHours" /><input type="hidden" class="cell-leave-type" name="GridRows[@i].Cells[@j].LeaveType" value="@((int)cell.LeaveType)" /><input type="hidden" class="cell-leave-hours" name="GridRows[@i].Cells[@j].LeaveHours" value="@cell.LeaveHours" />
                                         <button type="button" class="day-button" data-bs-toggle="modal" data-bs-target="#attendanceModal" data-date="@cell.BusinessDate.ToString("yyyy-MM-dd")" aria-label="Edit @row.EmployeeName for @cell.BusinessDate.ToString("d MMMM yyyy")@(cell.IsOffDay ? " OFF day" : "")"><span class="cell-value">@(cell.IsOffDay ? cell.WorkingHours > 0 ? cell.WorkingHours.ToString("0.00") : "OFF" : leave ? cell.LeaveType.ToString().Replace("Leave", "") : cell.WorkingHours.ToString("0.00"))</span><span class="cell-note">@(cell.IsOffDay ? cell.WorkingHours > 0 ? "OT hrs" : "Tap for OT" : leave ? "leave" : "hrs")</span></button>
                                     </td>
@@ -107,7 +114,7 @@
     }
     else if (!Model.GroupMissing)
     {
-        <div class="alert alert-info">No active employees are tagged as "Pregnant" yet.</div>
+        <div class="alert alert-info">@(Model.WorkshopId is null ? "No active employees are tagged as \"Pregnant\" yet." : "No pregnant employees in the selected workshop.")</div>
     }
 </div>
 
@@ -122,6 +129,8 @@
             <div class="period-group" id="periodGroup" hidden><div><label class="form-label" for="leaveStartTime">From</label><input class="form-control" id="leaveStartTime" type="time" value="08:00" /></div><div><label class="form-label" for="leaveEndTime">To</label><input class="form-control" id="leaveEndTime" type="time" value="12:00" /></div><div class="period-result" aria-live="polite"><span>Leave hours</span><strong id="calculatedLeaveHours">4.00 hrs</strong></div></div>
             <p class="small text-muted mb-0" id="motherRange" hidden>Save will open the Mother Leave date range calendar.</p>
         </div>
+        <div class="mt-3"><label class="form-label" for="modalWorkshop">Worked in</label><select id="modalWorkshop" class="form-select" asp-items="Model.TransferOptions"></select><p class="small text-muted mt-1 mb-0">Choose another workshop to record a transfer. The hours and leave stay the same; only the workshop they are counted in changes.</p></div>
+        <div class="mt-3"><label class="form-label" for="modalNote">Note</label><textarea id="modalNote" class="form-control" rows="3" maxlength="@AttendanceNote.MaxLength" placeholder="e.g. Annual leave booked for 13 May, moved to Pellet Ass'y"></textarea><div class="text-end small text-muted mt-1" id="modalNoteCount">0/@AttendanceNote.MaxLength</div></div>
                 <div id="modalError" class="alert alert-danger py-2 mt-3 mb-0 small" role="alert" hidden></div>
     </div>
     <div class="modal-footer"><button type="button" class="btn btn-outline-danger me-auto" id="modalClearLeave" hidden>Cancel leave</button><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button><button type="button" class="btn btn-primary" id="modalApply">Save edit</button></div>
@@ -168,7 +177,15 @@
     byId('modalLeaveType').addEventListener('change', updateModalControls); byId('leaveStartTime').addEventListener('input', () => calculatePeriod()); byId('leaveEndTime').addEventListener('input', () => calculatePeriod());
 
     function leaveClass(leaveType) { return ({ '1': 'annual', '2': 'sick', '3': 'business', '4': 'other', '5': 'absent', '6': 'mother' })[leaveType] || ''; }
-    function setCellState(cell, leaveType, isCustom) { const isOff = cell.dataset.off === 'true'; cell.classList.remove('leave', 'leave-annual', 'leave-sick', 'leave-business', 'leave-other', 'leave-absent', 'leave-mother', 'hours', 'has-ot'); if (isOff) { cell.classList.add('off'); cell.classList.toggle('has-ot', Number(cell.querySelector('.cell-hours').value) > 0); } else if (leaveType !== noLeave) { cell.classList.add('leave', `leave-${leaveClass(leaveType)}`); } else if (isCustom) cell.classList.add('hours'); }
+    function setCellState(cell, leaveType, isCustom) { const isOff = cell.dataset.off === 'true'; cell.classList.remove('leave', 'leave-annual', 'leave-sick', 'leave-business', 'leave-other', 'leave-absent', 'leave-mother', 'hours', 'has-ot'); if (isOff) { cell.classList.add('off'); cell.classList.toggle('has-ot', Number(cell.querySelector('.cell-hours').value) > 0); } else if (leaveType !== noLeave) { cell.classList.add('leave', `leave-${leaveClass(leaveType)}`); } else if (isCustom) cell.classList.add('hours'); decorateCell(cell); }
+    // A cell counted in a workshop other than the employee's own is a transfer; a note shows a red corner.
+    function workshopName(id) { return [...byId('modalWorkshop').options].find(option => option.value === String(id))?.text || ''; }
+    function decorateCell(cell) {
+        const transfer = cell.dataset.workshop !== cell.dataset.homeWorkshop, note = cell.dataset.note || '';
+        cell.classList.toggle('transfer', transfer); cell.classList.toggle('has-note', note !== '');
+        const tip = [transfer && `Transfer to ${workshopName(cell.dataset.workshop) || '?'}`, note && `Note: ${note}`].filter(Boolean).join('\n');
+        if (tip) cell.title = tip; else cell.removeAttribute('title');
+    }
     function leaveLabel() { return byId('modalLeaveType').selectedOptions[0].text.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s*Leave$/, '').trim(); }
     function updateRowTotals(row) { const cells = [...row.querySelectorAll('.calendar-cell')]; let hasOverLimit = false; row.querySelectorAll('.weekly-total').forEach(totalCell => { const start = Number(totalCell.dataset.weekStartIndex), count = Number(totalCell.dataset.weekCount), weeklyHours = cells.slice(start, start + count).reduce((sum, cell) => sum + Number(cell.querySelector('.cell-hours').value || 0), 0); totalCell.querySelector('output').textContent = weeklyHours.toFixed(2); totalCell.classList.toggle('over-limit', weeklyHours > maxWeeklyHours); totalCell.setAttribute('aria-label', `Weekly total ${weeklyHours.toFixed(2)} hours${weeklyHours > maxWeeklyHours ? ', exceeds the ' + maxWeeklyHours + ' hour limit' : ''}`); hasOverLimit ||= weeklyHours > maxWeeklyHours; }); return hasOverLimit; }
     function syncWeeklyError() { const hasOverLimit = document.querySelector('.weekly-total.over-limit') !== null, error = byId('attendanceClientError'); if (hasOverLimit) { error.className = 'alert alert-danger mt-3 mb-0'; error.textContent = `Weekly working hours exceed the ${maxWeeklyHours}-hour limit. Reduce the hours.`; error.hidden = false; } return hasOverLimit; }
@@ -221,8 +238,21 @@
 
     document.querySelectorAll('.day-button').forEach(button => button.addEventListener('click', () => {
         activeCell = button.closest('.calendar-cell'); const row = button.closest('tr'), isOff = activeCell.dataset.off === 'true', hours = Number(activeCell.querySelector('.cell-hours').value || 0), leaveType = activeCell.querySelector('.cell-leave-type').value, leaveHours = Number(activeCell.querySelector('.cell-leave-hours').value || standardHours), hasLeave = !isOff && leaveType !== noLeave;
-        byId('modalContext').textContent = `${row.querySelector('.sticky-name').childNodes[0].textContent.trim()} · ${button.dataset.date}${isOff ? ' · OFF / OT' : ''}`; byId('modalHours').value = hours.toFixed(2); byId('modalLeaveType').value = hasLeave ? leaveType : byId('modalLeaveType').options[0].value; byId('modeLeave').disabled = isOff; byId('modeLeave').checked = hasLeave; byId('modeHours').checked = !hasLeave; byId('leaveFullDay').checked = !hasLeave || leaveHours >= standardHours; byId('leavePeriod').checked = hasLeave && leaveHours < standardHours; byId('leaveStartTime').value = '08:00'; byId('leaveEndTime').value = timeFromMinutes(8 * 60 + Math.round(Math.min(leaveHours, standardHours) * 60)); byId('motherStartDate').value = button.dataset.date; byId('motherEndDate').value = button.dataset.date; byId('modalClearLeave').hidden = !hasLeave; updateModalControls();
+        byId('modalContext').textContent = `${row.querySelector('.sticky-name').childNodes[0].textContent.trim()} · ${button.dataset.date}${isOff ? ' · OFF / OT' : ''}`; byId('modalHours').value = hours.toFixed(2); byId('modalLeaveType').value = hasLeave ? leaveType : byId('modalLeaveType').options[0].value; byId('modeLeave').disabled = isOff; byId('modeLeave').checked = hasLeave; byId('modeHours').checked = !hasLeave; byId('leaveFullDay').checked = !hasLeave || leaveHours >= standardHours; byId('leavePeriod').checked = hasLeave && leaveHours < standardHours; byId('leaveStartTime').value = '08:00'; byId('leaveEndTime').value = timeFromMinutes(8 * 60 + Math.round(Math.min(leaveHours, standardHours) * 60)); byId('motherStartDate').value = button.dataset.date; byId('motherEndDate').value = button.dataset.date; byId('modalClearLeave').hidden = !hasLeave;
+        const workshopSelect = byId('modalWorkshop'); if (![...workshopSelect.options].some(option => option.value === activeCell.dataset.workshop)) workshopSelect.add(new Option(`Workshop ${activeCell.dataset.workshop}`, activeCell.dataset.workshop));
+        workshopSelect.value = activeCell.dataset.workshop; byId('modalNote').value = activeCell.dataset.note || ''; updateNoteCount(); updateModalControls();
     }));
+    function updateNoteCount() { const note = byId('modalNote'); byId('modalNoteCount').textContent = `${note.value.length}/${note.maxLength}`; }
+    byId('modalNote').addEventListener('input', updateNoteCount);
+
+    // Transfer… and Note… reopen the last clicked day, like the leave shortcuts, with that field focused.
+    function editSelectedDay(focusId) {
+        if (!activeCell) { byId('attendanceClientError').className = 'alert alert-info mt-3 mb-0'; byId('attendanceClientError').textContent = 'Click a day in the table first, then choose Transfer or Note.'; byId('attendanceClientError').hidden = false; return; }
+        byId('attendanceModal').addEventListener('shown.bs.modal', () => byId(focusId).focus(), { once: true });
+        activeCell.querySelector('.day-button').click();
+    }
+    byId('pregnantTransfer')?.addEventListener('click', () => editSelectedDay('modalWorkshop'));
+    byId('pregnantNote')?.addEventListener('click', () => editSelectedDay('modalNote'));
 
     async function saveCellToServer(cell) {
         const body = new URLSearchParams({
@@ -231,6 +261,7 @@
             workingHours: cell.querySelector('.cell-hours').value,
             leaveType: cell.querySelector('.cell-leave-type').value,
             leaveHours: cell.querySelector('.cell-leave-hours').value,
+            workedIn: cell.dataset.workshop,
             StartMonth: '@Model.StartMonth', EndMonth: '@Model.EndMonth'
         });
         const token = document.querySelector('#attendanceForm input[name="__RequestVerificationToken"]')?.value;
@@ -238,16 +269,32 @@
         return response.json();
     }
 
+    async function saveNoteToServer(cell, text) {
+        const body = new URLSearchParams({ employeeId: cell.dataset.employeeId, businessDate: cell.dataset.date, text });
+        const token = document.querySelector('#attendanceForm input[name="__RequestVerificationToken"]')?.value;
+        const response = await fetch('@Url.Page("Pregnant", "Note")', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token || '' }, body });
+        return response.json();
+    }
+
     byId('modalApply').addEventListener('click', async () => {
         if (!activeCell) return;
         const isLeave = byId('modeLeave').checked, leaveType = byId('modalLeaveType').value, isMother = isLeave && leaveType === motherLeave, isPeriod = isLeave && !isMother && byId('leavePeriod').checked, enteredHours = Number(byId('modalHours').value), leaveHours = !isLeave ? 0 : isPeriod ? calculatePeriod(true) : standardHours;
         if ((!isLeave && (!Number.isFinite(enteredHours) || enteredHours < 0 || enteredHours > standardHours)) || (isLeave && !Number.isFinite(leaveHours))) { if (!isLeave) showModalError(`Enter working hours between 0 and ${standardHours.toFixed(2)}.`); return; }
+        const workshop = byId('modalWorkshop').value, note = byId('modalNote').value.trim(), noteChanged = note !== (activeCell.dataset.note || '');
+        async function saveNote() {
+            if (!noteChanged) return true;
+            try { const result = await saveNoteToServer(activeCell, note); if (!result.ok) { showModalError(result.error || 'Could not save the note.'); return false; } }
+            catch { showModalError('Could not save the note. Check your connection and try again.'); return false; }
+            activeCell.dataset.note = note; decorateCell(activeCell); return true;
+        }
         if (isMother) {
+            if (!await saveNote()) return;
             const employeeId = activeCell.dataset.employeeId, date = activeCell.dataset.date;
             byId('attendanceModal').addEventListener('hidden.bs.modal', () => openMotherLeave(employeeId, date), { once: true });
             bootstrap.Modal.getOrCreateInstance(byId('attendanceModal')).hide();
             return;
         }
+        activeCell.dataset.workshop = workshop;
         const row = activeCell.closest('tr'); let targets = [activeCell];
         const workingHours = isLeave ? Math.max(0, standardHours - leaveHours) : enteredHours;
         targets.forEach(cell => { const isOff = cell.dataset.off === 'true'; cell.querySelector('.cell-hours').value = workingHours.toFixed(2); cell.querySelector('.cell-leave-type').value = isLeave ? leaveType : noLeave; cell.querySelector('.cell-leave-hours').value = isLeave ? leaveHours.toFixed(2) : '0.00'; cell.querySelector('.cell-value').textContent = isOff ? workingHours > 0 ? workingHours.toFixed(2) : 'OFF' : isLeave ? leaveLabel() : workingHours.toFixed(2); cell.querySelector('.cell-note').textContent = isOff ? workingHours > 0 ? 'OT hrs' : 'Tap for OT' : isLeave ? (isPeriod ? `${leaveHours.toFixed(2)}h leave` : 'leave') : 'hrs'; setCellState(cell, isLeave ? leaveType : noLeave, !isLeave && workingHours !== standardHours); });
@@ -260,6 +307,7 @@
                     const result = await saveCellToServer(cell);
                     if (!result.ok) { showModalError(result.error || 'Could not save this day.'); byId('modalApply').disabled = false; return; }
                 }
+                if (!await saveNote()) { byId('modalApply').disabled = false; return; }
             } catch { showModalError('Could not save this day. Check your connection and try again.'); byId('modalApply').disabled = false; return; }
             byId('modalApply').disabled = false;
         }
@@ -272,6 +320,7 @@
         bootstrap.Modal.getOrCreateInstance(byId('attendanceModal')).hide();
     });
 
+    document.querySelectorAll('.calendar-cell').forEach(decorateCell);
 })();
 </script>
 }

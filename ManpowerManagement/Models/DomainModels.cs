@@ -8,6 +8,15 @@ public static class Roles
     public const string Approver = "ResignationApprover";
 }
 
+public static class JobGrades
+{
+    // Job grades look like "59T": the leading number is the grade. From this grade up, only Admin or an Approver may edit the employee.
+    public const int ApproverOnlyFrom = 59;
+
+    public static bool RequiresApprover(string? jobGrade) =>
+        int.TryParse(new string((jobGrade ?? "").Trim().TakeWhile(char.IsDigit).ToArray()), out var grade) && grade >= ApproverOnlyFrom;
+}
+
 public enum EmploymentType { NewComer, Permanent }
 public enum EmploymentState { Active, Resigned }
 public enum LeaveType { None, AnnualLeave, SickLeave, BusinessLeave, OtherLeave, Absent, MotherLeave }
@@ -197,6 +206,20 @@ public class NewHireNote
     public string Comment { get; set; } = string.Empty;
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+// A supervisor's remark on one employee's attendance day (leave reason, transfer, OT ...), like an Excel cell note.
+// Kept apart from AttendanceEntry because a default 100% day has no entry and putting a cell back to default removes it.
+public class AttendanceNote
+{
+    public const int MaxLength = 500;
+    public int Id { get; set; }
+    public int EmployeeId { get; set; }
+    public Employee? Employee { get; set; }
+    public DateOnly BusinessDate { get; set; }
+    public string Text { get; set; } = string.Empty;
+    public string UpdatedBy { get; set; } = string.Empty;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public static class NewHireNoteKind

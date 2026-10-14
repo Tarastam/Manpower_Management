@@ -10,8 +10,26 @@ using Microsoft.EntityFrameworkCore;
 namespace ManpowerManagement.Pages.Admin;
 
 // Read-only view of the daily hour summaries (Total / Indirect / Direct) that DailyHoursService stores per day, workshop and shift.
-public class WorkingHoursModel(AppDbContext db) : PageModel
+public class WorkingHoursModel(AppDbContext db, AttendanceStagingStore staging, AttendanceFlushService flush) : PageModel
 {
+    [TempData] public string? FlushMessage { get; set; }
+    public int PendingCount => staging.PendingCount;
+
+    // Copies the staged attendance edits to SQL now, then recounts the affected days.
+    public async Task<IActionResult> OnPostFlushAsync()
+    {
+        try
+        {
+            var pending = await flush.RunNowAsync(DateTime.Now, HttpContext.RequestAborted);
+            FlushMessage = pending == 0 ? "ไม่มีข้อมูลค้างใน staging" : $"ส่งข้อมูลเข้า SQL แล้ว ({pending:N0} รายการ)";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            FlushMessage = "ส่งข้อมูลเข้า SQL ไม่สำเร็จ ข้อมูลยังอยู่ใน staging: " + ex.Message;
+        }
+        return RedirectToPage();
+    }
+
     public const string StatusOk = "ok", StatusReview = "review", StatusCorrected = "corrected";
     static readonly string[] ThaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 

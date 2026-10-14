@@ -27,6 +27,12 @@ public class PregnantModel(AppDbContext db, LeaderSessionService leaderSessions,
 
     [BindProperty(SupportsGet = true)] public string StartMonth { get; set; } = "";
     [BindProperty(SupportsGet = true)] public string EndMonth { get; set; } = "";
+    [BindProperty(SupportsGet = true)] public int? WorkshopId { get; set; }
+    public List<Microsoft.AspNetCore.Mvc.Rendering.SelectListItem> WorkshopOptions { get; set; } = [];
+    // Every workshop with active employees, for "worked in" on a transfer.
+    public List<Microsoft.AspNetCore.Mvc.Rendering.SelectListItem> TransferOptions { get; set; } = [];
+    // Employee id → the workshop they belong to; a cell counted in any other workshop is a transfer.
+    public Dictionary<int, int> HomeWorkshops { get; set; } = [];
     public List<IndexModel.GridRow> GridRows { get; set; } = [];
     public List<DateOnly> Days { get; set; } = [];
     public List<IndexModel.WeekGroup> WeekGroups { get; set; } = [];
@@ -40,7 +46,14 @@ public class PregnantModel(AppDbContext db, LeaderSessionService leaderSessions,
             .Where(e => e.EmploymentState == EmploymentState.Active && e.SpecialGroups.Any(g => g.SpecialGroup!.Name == GroupName))
             .OrderBy(e => e.FullName).ToListAsync();
         if (!await db.SpecialGroups.AnyAsync(g => g.Name == GroupName)) { GroupMissing = true; }
+        var workshopIds = employees.Select(e => e.CurrentWorkshopId).Distinct().ToList();
+        WorkshopOptions = (await db.Workshops.Where(w => workshopIds.Contains(w.Id)).OrderBy(w => w.Name).ToListAsync())
+            .Select(w => new Microsoft.AspNetCore.Mvc.Rendering.SelectListItem(w.Name, w.Id.ToString())).ToList();
+        if (WorkshopId is int workshopId) employees = employees.Where(e => e.CurrentWorkshopId == workshopId).ToList();
+        TransferOptions = await db.Employees.Where(e => e.EmploymentState == EmploymentState.Active).Select(e => e.CurrentWorkshop!).Where(w => w != null).Distinct().OrderBy(w => w.Name)
+            .Select(w => new Microsoft.AspNetCore.Mvc.Rendering.SelectListItem(w.Name, w.Id.ToString())).ToListAsync();
         var employeeIds = employees.Select(e => e.Id).ToHashSet();
+        HomeWorkshops = employees.ToDictionary(e => e.Id, e => e.CurrentWorkshopId);
         var first = Days.First(); var last = Days.Last();
         var entries = await db.AttendanceEntries
             .Where(e => e.Shift == ShiftKey && e.IsConfirmed && e.BusinessDate >= first && e.BusinessDate <= last && employeeIds.Contains(e.EmployeeId))
@@ -65,24 +78,36 @@ public class PregnantModel(AppDbContext db, LeaderSessionService leaderSessions,
                 if (isOffDay)
                 {
                     return entries.TryGetValue((employee.Id, day), out var overtimeEntry)
-                        ? new IndexModel.AttendanceCell { BusinessDate = day, WorkingHours = overtimeEntry.WorkingHours, WorkshopId = employee.CurrentWorkshopId, IsOffDay = true, IsConfirmed = overtimeEntry.IsConfirmed }
+                        ? new IndexModel.AttendanceCell { BusinessDate = day, WorkingHours = overtimeEntry.WorkingHours, WorkshopId = overtimeEntry.WorkshopId, IsOffDay = true, IsConfirmed = overtimeEntry.IsConfirmed }
                         : new IndexModel.AttendanceCell { BusinessDate = day, WorkshopId = employee.CurrentWorkshopId, WorkingHours = 0, IsOffDay = true };
                 }
                 return entries.TryGetValue((employee.Id, day), out var entry)
-                    ? new IndexModel.AttendanceCell { BusinessDate = day, WorkingHours = entry.WorkingHours, WorkshopId = employee.CurrentWorkshopId, LeaveType = entry.LeaveType, LeaveHours = entry.LeaveHours, IsConfirmed = entry.IsConfirmed }
+                    ? new IndexModel.AttendanceCell { BusinessDate = day, WorkingHours = entry.WorkingHours, WorkshopId = entry.WorkshopId, LeaveType = entry.LeaveType, LeaveHours = entry.LeaveHours, IsConfirmed = entry.IsConfirmed }
                     : new IndexModel.AttendanceCell { BusinessDate = day, WorkshopId = employee.CurrentWorkshopId, WorkingHours = StandardHours };
             }).ToList()
         }).ToList();
+
+        // Remarks: stored ones, covered by any change still waiting in the staging file (an empty text clears it).
+        var remarks = (await db.AttendanceNotes.AsNoTracking().Where(n => n.BusinessDate >= first && n.BusinessDate <= last && employeeIds.Contains(n.EmployeeId)).ToListAsync())
+            .ToDictionary(n => (n.EmployeeId, n.BusinessDate), n => n.Text);
+        foreach (var n in staging.PendingNotes(x => x.Date >= first && x.Date <= last && employeeIds.Contains(x.EmployeeId))) remarks[(n.EmployeeId, n.Date)] = n.Text;
+        foreach (var row in GridRows)
+            foreach (var cell in row.Cells)
+                if (remarks.TryGetValue((row.EmployeeId, cell.BusinessDate), out var text)) cell.Note = text;
     }
 
     // Saves one day. The change waits in the staging file and is copied to SQL at 07:00 / 19:00.
-    public async Task<IActionResult> OnPostCellAsync(int employeeId, DateOnly businessDate, decimal workingHours, LeaveType leaveType, decimal leaveHours)
+    // workedIn is the workshop the hours are counted in; 0 or the employee's own workshop means no transfer.
+    public async Task<IActionResult> OnPostCellAsync(int employeeId, DateOnly businessDate, decimal workingHours, LeaveType leaveType, decimal leaveHours, int workedIn = 0)
     {
         var today = BusinessDateService.Current();
         if (!User.IsInRole(Roles.Admin) && businessDate < today) return new JsonResult(new { ok = false, error = "Only Admin can edit a previous business date." });
 
         var employee = await db.Employees.FindAsync(employeeId);
         if (employee == null) return new JsonResult(new { ok = false, error = "Employee not found." });
+
+        var workshop = workedIn == 0 ? employee.CurrentWorkshopId : workedIn;
+        if (workshop != employee.CurrentWorkshopId && !await db.Workshops.AnyAsync(w => w.Id == workshop)) return new JsonResult(new { ok = false, error = "Unknown workshop." });
 
         var isOffDay = IsDefaultOffDay(businessDate);
         if (isOffDay && (leaveType != LeaveType.None || leaveHours != 0)) return new JsonResult(new { ok = false, error = "OFF day entries can contain working hours only." });
@@ -99,15 +124,30 @@ public class PregnantModel(AppDbContext db, LeaderSessionService leaderSessions,
         var weeklyHours = Enumerable.Range(0, 7).Select(i => weekStart.AddDays(i)).Where(day => day != businessDate).Sum(HoursOn);
         if (weeklyHours + workingHours > MaxWeeklyHours) return new JsonResult(new { ok = false, error = $"Weekly working hours cannot exceed {MaxWeeklyHours:0} hours." });
 
-        var isDefault = leaveType == LeaveType.None && workingHours == DefaultHours(businessDate);
+        var isDefault = leaveType == LeaveType.None && workingHours == DefaultHours(businessDate) && workshop == employee.CurrentWorkshopId;
         if (isDefault)
         {
             if (stored.ContainsKey(businessDate) || pending.ContainsKey(businessDate))
                 staging.StageCells([new StagedCell { EmployeeId = employeeId, Date = businessDate, Shift = ShiftKey, WorkshopId = employee.CurrentWorkshopId, Revert = true, Actor = Actor }]);
         }
         else
-            staging.StageCells([new StagedCell { EmployeeId = employeeId, Date = businessDate, Shift = ShiftKey, WorkshopId = employee.CurrentWorkshopId, Hours = workingHours, LeaveType = (int)leaveType, LeaveHours = leaveType == LeaveType.None ? 0 : leaveHours, Actor = Actor }]);
+            staging.StageCells([new StagedCell { EmployeeId = employeeId, Date = businessDate, Shift = ShiftKey, WorkshopId = workshop, Hours = workingHours, LeaveType = (int)leaveType, LeaveHours = leaveType == LeaveType.None ? 0 : leaveHours, Actor = Actor }]);
         return new JsonResult(new { ok = true, weeklyTotal = weeklyHours + workingHours });
+    }
+
+    // A remark belongs to the employee and the day; an empty text clears it. Stored apart from the hours.
+    public async Task<IActionResult> OnPostNoteAsync(int employeeId, DateOnly businessDate, string? text)
+    {
+        if (!User.IsInRole(Roles.Admin) && businessDate < BusinessDateService.Current()) return new JsonResult(new { ok = false, error = "Only Admin can edit a previous business date." });
+        if (!await db.Employees.AnyAsync(e => e.Id == employeeId && e.EmploymentState == EmploymentState.Active && e.SpecialGroups.Any(g => g.SpecialGroup!.Name == GroupName)))
+            return new JsonResult(new { ok = false, error = "Select an active Pregnant employee." });
+        text = (text ?? "").Trim();
+        if (text.Length > AttendanceNote.MaxLength) return new JsonResult(new { ok = false, error = $"A note can be at most {AttendanceNote.MaxLength} characters." });
+
+        var pendingNote = staging.PendingNotes(n => n.EmployeeId == employeeId && n.Date == businessDate).FirstOrDefault();
+        var current = pendingNote?.Text ?? (await db.AttendanceNotes.AsNoTracking().FirstOrDefaultAsync(n => n.EmployeeId == employeeId && n.BusinessDate == businessDate))?.Text ?? "";
+        if (current != text) staging.StageNotes([new StagedNote { EmployeeId = employeeId, Date = businessDate, Text = text, Actor = Actor }]);
+        return new JsonResult(new { ok = true });
     }
 
     public async Task<IActionResult> OnPostMotherLeaveAsync(int employeeId, DateOnly startDate, DateOnly endDate)

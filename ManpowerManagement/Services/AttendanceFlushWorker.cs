@@ -20,17 +20,44 @@ public class AttendanceFlushService(AppDbContext db, DailyHoursService dailyHour
         return now >= evening ? evening : now >= morning ? morning : now.Date.AddDays(-1) + EveningSlot;
     }
 
+    // One flush at a time, whether it comes from the worker or from the Flush now button.
+    static readonly SemaphoreSlim RunGate = new(1, 1);
+
     // Runs the flush when a slot has passed since the last one (also catches up after the app was down).
     public async Task<bool> RunIfDueAsync(DateTime now, CancellationToken cancellationToken = default)
     {
-        var slot = LatestSlot(now);
-        if (store.LastSlot is DateTime last && last >= slot) return false;
+        await RunGate.WaitAsync(cancellationToken);
+        try
+        {
+            var slot = LatestSlot(now);
+            if (store.LastSlot is DateTime last && last >= slot) return false;
+            await RunAsync(now, slot, cancellationToken);
+            return true;
+        }
+        finally { RunGate.Release(); }
+    }
+
+    // The Flush now button: copies everything staged to SQL straight away instead of waiting for 07:00 / 19:00.
+    // Returns how many staged items were waiting before the run.
+    public async Task<int> RunNowAsync(DateTime now, CancellationToken cancellationToken = default)
+    {
+        await RunGate.WaitAsync(cancellationToken);
+        try
+        {
+            var pending = store.PendingCount;
+            await RunAsync(now, LatestSlot(now), cancellationToken);
+            return pending;
+        }
+        finally { RunGate.Release(); }
+    }
+
+    async Task RunAsync(DateTime now, DateTime slot, CancellationToken cancellationToken)
+    {
         var touched = await FlushAsync(cancellationToken);
         var current = BusinessDateService.Current(now);
         await RefreshTouchedAsync(touched, current, cancellationToken);
         var finalized = await FinalizeClosedDaysAsync(current, cancellationToken);
         store.MarkSlot(slot, finalized);
-        return true;
     }
 
     // Writes every staged item to SQL in one SaveChanges, then drops the flushed items from the staging file.
@@ -91,8 +118,35 @@ public class AttendanceFlushService(AppDbContext db, DailyHoursService dailyHour
             }
         }
 
+        var changedNotes = 0;
+        if (snapshot.Notes.Count > 0)
+        {
+            var ids = snapshot.Notes.Select(n => n.EmployeeId).Distinct().ToList();
+            var min = snapshot.Notes.Min(n => n.Date); var max = snapshot.Notes.Max(n => n.Date);
+            var validEmployees = (await db.Employees.Where(e => ids.Contains(e.Id)).Select(e => e.Id).ToListAsync(cancellationToken)).ToHashSet();
+            var existing = (await db.AttendanceNotes.Where(n => n.BusinessDate >= min && n.BusinessDate <= max && ids.Contains(n.EmployeeId)).ToListAsync(cancellationToken))
+                .ToDictionary(n => (n.EmployeeId, n.BusinessDate));
+            foreach (var change in snapshot.Notes.OrderBy(n => n.Version))
+            {
+                if (!validEmployees.Contains(change.EmployeeId)) { logger.LogWarning("Staged remark for unknown employee {Employee} was dropped.", change.EmployeeId); continue; }
+                existing.TryGetValue((change.EmployeeId, change.Date), out var note);
+                if (string.IsNullOrWhiteSpace(change.Text))
+                {
+                    if (note is not null) { db.AttendanceNotes.Remove(note); existing.Remove((change.EmployeeId, change.Date)); changedNotes++; }
+                    continue;
+                }
+                if (note is null)
+                {
+                    note = new AttendanceNote { EmployeeId = change.EmployeeId, BusinessDate = change.Date };
+                    db.AttendanceNotes.Add(note); existing[(change.EmployeeId, change.Date)] = note;
+                }
+                note.Text = change.Text; note.UpdatedBy = change.Actor; note.UpdatedAtUtc = DateTime.UtcNow;
+                changedNotes++;
+            }
+        }
+
         db.AuditLogs.Add(new AuditLog { EntityName = "Attendance", EntityKey = $"flush:{DateTime.Now:yyyy-MM-dd HH:mm}", Action = "Flushed staged attendance", Actor = "system",
-            Detail = $"{changedEntries} attendance changes, {changedManpower} indirect headcounts" });
+            Detail = $"{changedEntries} attendance changes, {changedManpower} indirect headcounts, {changedNotes} remarks" });
         await db.SaveChangesAsync(cancellationToken);
         store.Remove(snapshot);
         return touched;

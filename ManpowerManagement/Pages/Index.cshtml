@@ -4,58 +4,22 @@
 @using System.Text.Json
 @using ManpowerManagement.Models
 @using ManpowerManagement.Services
-@functions {
-    static readonly Dictionary<string, string> IconPaths = new()
-    {
-        ["users"] = "<path d=\"M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/><path d=\"M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75\"/>",
-        ["user"] = "<path d=\"M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/>",
-        ["plus"] = "<path d=\"M12 5v14M5 12h14\"/>",
-        ["target"] = "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>",
-        ["bars"] = "<path d=\"M12 20V10M18 20V4M6 20v-4\"/>",
-        ["scale"] = "<path d=\"M12 3v18M3 7h18M5 7l-3 6a3 3 0 0 0 6 0L5 7zM19 7l-3 6a3 3 0 0 0 6 0l-3-6z\"/>",
-        ["sigma"] = "<path d=\"M18 7V4H6l6 8-6 8h12v-3\"/>",
-        ["box"] = "<path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/><path d=\"M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12\"/>",
-        ["pin"] = "<path d=\"M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/>",
-        ["sprout"] = "<path d=\"M12 22V12\"/><path d=\"M12 12C12 7 8 4 3 4c0 5 3 8 9 8zM12 14c0-4 3-7 9-7 0 5-3 8-9 8\"/>",
-        ["database"] = "<ellipse cx=\"12\" cy=\"5\" rx=\"9\" ry=\"3\"/><path d=\"M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5\"/>",
-        ["flask"] = "<path d=\"M9 3h6M10 3v6L4 20h16L14 9V3\"/>",
-        ["layers"] = "<path d=\"M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\"/>",
-        ["gear"] = "<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/>"
-    };
-
-    static Microsoft.AspNetCore.Html.IHtmlContent Icon(string name) => new Microsoft.AspNetCore.Html.HtmlString(
-        "<svg class=\"wd-ico\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">" +
-        IconPaths.GetValueOrDefault(name, "") + "</svg>");
-
-    static string RowIcon(WorkforceDashboardService.ManpowerRow row) => row.Kind switch
-    {
-        WorkforceDashboardService.ManpowerRowKind.Subtotal or WorkforceDashboardService.ManpowerRowKind.GrandSubtotal or WorkforceDashboardService.ManpowerRowKind.GrandTotal => "sigma",
-        WorkforceDashboardService.ManpowerRowKind.Staff => "layers",
-        WorkforceDashboardService.ManpowerRowKind.DirectLabor => "user",
-        _ => row.Label switch
-        {
-            "Pellet line" => "sprout", "Pellet Ass'y" => "database", "Anodization & Silicone" => "gear", "Polymer & GR-AGP." => "flask",
-            "GPS-P2" => "pin", "FPS A" or "FPS B" => "bars", _ => "box"
-        }
-    };
-
-    // The colour comes from an admin-edited field and ends up in a style attribute, so only a plain hex value is let through.
-    static string SafeColor(string? hex) =>
-        hex is { Length: 4 or 7 } && hex[0] == '#' && hex.Skip(1).All(Uri.IsHexDigit) ? hex : "#6c757d";
-}
-
 @{
     ViewData["Title"] = "Workforce overview";
     var report = Model.Report;
     var mp = report.Manpower;
     var monthLabel = DateTime.ParseExact(report.Month, "yyyy-MM", CultureInfo.InvariantCulture).ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+    var periodNote = report.PeriodEnd == DateOnly.Parse(report.Month + "-01") && mp.Period == WorkforceDashboardService.Mtd
+        ? "No reporting days yet"
+        : (mp.Period == WorkforceDashboardService.Mtd ? "" : mp.PeriodLabel + " · ") + "Data through " + report.PeriodEnd.AddDays(-1).ToString("dd MMM yyyy", CultureInfo.InvariantCulture);
+    var periodLabel = mp.Period == WorkforceDashboardService.Mtd ? "MTD" : mp.PeriodLabel;
     var workshopData = JsonSerializer.Serialize(report.Workshops.Select(x => new { id = x.Id, name = x.Name, parentId = x.ParentId }));
 }
 <div class="workforce-dashboard">
     <div class="wd-heading">
         <div>
             <h1>Workforce overview</h1>
-            <p>@monthLabel · @report.WorkshopLabel</p>
+            <p>@monthLabel · @(mp.Period == WorkforceDashboardService.Mtd ? "MTD" : mp.PeriodLabel) · @report.WorkshopLabel</p>
         </div>
     </div>
 
@@ -82,8 +46,17 @@
                 <div class="wd-workshop-results" id="dashboard-workshop-results" aria-live="polite"></div>
             </div>
         </div>
+        <div class="wd-filter-field wd-period">
+            <label for="dashboard-period">Period</label>
+            <select id="dashboard-period" name="period">
+                @foreach (var option in mp.Periods)
+                {
+                    <option value="@option.Key" selected="@(option.Key == mp.Period)" disabled="@(!option.Available)">@option.Label (@option.Range)</option>
+                }
+            </select>
+        </div>
         <button class="wd-apply" type="submit">Apply filters</button>
-        <p class="wd-period-note">@(report.PeriodEnd == DateOnly.Parse(report.Month + "-01") ? "No reporting days yet" : "Data through " + report.PeriodEnd.AddDays(-1).ToString("dd MMM yyyy", CultureInfo.InvariantCulture))</p>
+        <p class="wd-period-note">@periodNote</p>
     </form>
 
     <section class="wd-kpis" aria-label="Key workforce metrics">
@@ -93,95 +66,42 @@
         </article>
         <article class="wd-card wd-kpi">
             <span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">✓</span>
-            <div><h2>Attendance rate (MTD)</h2><strong>@(report.ScheduledPersonDays == 0 ? "—" : report.AttendanceRate.ToString("N1") + "%")</strong><p>People present / scheduled headcount days</p></div>
+            <div><h2>Attendance rate (@periodLabel)</h2><strong>@(report.ScheduledPersonDays == 0 ? "—" : report.AttendanceRate.ToString("N1") + "%")</strong><p>People present / scheduled headcount days</p></div>
         </article>
         <article class="wd-card wd-kpi">
             <span class="wd-kpi-icon wd-icon-amber" aria-hidden="true">!</span>
-            <div><h2>Absence rate</h2><strong>@(report.ScheduledPersonDays == 0 ? "—" : report.AbsenceRate.ToString("N1") + "%")</strong><p>Absent person-days / scheduled headcount days</p></div>
+            <div><h2>Absence rate (@periodLabel)</h2><strong>@(report.ScheduledPersonDays == 0 ? "—" : report.AbsenceRate.ToString("N1") + "%")</strong><p>Absent person-days / scheduled headcount days</p></div>
         </article>
         <article class="wd-card wd-kpi">
             <span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">↻</span>
-            <div><h2>Turnover rate</h2><strong>@report.TurnoverRate.ToString("N1")%</strong></div>
+            <div><h2>Turnover rate (@periodLabel)</h2><strong>@report.TurnoverRate.ToString("N1")%</strong></div>
         </article>
     </section>
 
     <div class="wd-content-grid">
         <div class="wd-main-panels">
-            <section class="wd-card wd-mp" aria-labelledby="mp-hc-title">
-                <div class="wd-mp-title"><span class="wd-mp-title-icon">@Icon("users")</span><h2 id="mp-hc-title">Headcount Summary</h2></div>
-                <div class="wd-mp-frame">
-                    <table class="wd-mp-table wd-mp-hc">
-                        <thead>
-                            <tr><th scope="col" class="wd-mp-h-cat">Category</th><th scope="col" class="wd-mp-h-cat">Chemical Line</th><th scope="col" class="wd-mp-h-cat">Assembly Line</th><th scope="col" class="wd-mp-h-total">Total</th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in mp.Support)
-                            {
-                                var sick = row.Label.Contains("sick", StringComparison.OrdinalIgnoreCase);
-                                <tr class="wd-mp-group" style="--g:@SafeColor(row.ColorHex)"><th scope="row"><span class="wd-mp-label"><span class="wd-mp-badge @(sick ? "wd-mp-badge-solid" : "")">@Icon(sick ? "plus" : "user")</span>@row.Label</span></th><td>@row.First.ToString("N0")</td><td>@row.Second.ToString("N0")</td><td class="wd-mp-blue">@row.Total.ToString("N0")</td></tr>
-                            }
-                            @if (mp.Support.Count == 0)
-                            {
-                                <tr><td colspan="4" class="wd-empty">No active special groups. Add them on the Special Groups page.</td></tr>
-                            }
-                            <tr class="wd-mp-grey"><th scope="row"><span class="wd-mp-label"><span class="wd-mp-badge">@Icon("users")</span>Total support</span></th><td>@mp.FirstSupport.ToString("N0")</td><td>@mp.SecondSupport.ToString("N0")</td><td class="wd-mp-blue">@mp.TotalSupport.ToString("N0")</td></tr>
-                            <tr class="wd-mp-remain"><th scope="row"><span class="wd-mp-label"><span class="wd-mp-badge">@Icon("user")</span>Normal Operator</span></th><td>@((mp.FirstHeadcount - mp.FirstSupport).ToString("N0"))</td><td>@((mp.SecondHeadcount - mp.SecondSupport).ToString("N0"))</td><td>@((mp.TotalHeadcount - mp.TotalSupport).ToString("N0"))</td></tr>
-                            <tr class="wd-mp-total-op"><th scope="row"><span class="wd-mp-label"><span class="wd-mp-badge">@Icon("users")</span>Total Operator</span></th><td>@mp.FirstHeadcount.ToString("N0")</td><td>@mp.SecondHeadcount.ToString("N0")</td><td class="wd-mp-blue">@mp.TotalHeadcount.ToString("N0")</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <p class="wd-method-note">Headcount on the last day of the period for 51T-52T employees; the workshop filter does not apply. Each row is an active special group, and Total support counts a tagged person once.</p>
-            </section>
-
-            <section class="wd-card wd-mp" aria-labelledby="mp-ws-title">
-                <div class="wd-mp-title"><span class="wd-mp-title-icon">@Icon("gear")</span><h2 id="mp-ws-title">Work Station Performance</h2></div>
-                <div class="wd-mp-frame">
-                    <table class="wd-mp-table wd-mp-ws">
-                        <thead><tr><th scope="col" class="wd-mp-h-cat">W/S</th><th scope="col" class="wd-mp-h-target"><span class="wd-mp-hlabel">@Icon("target")New target</span></th><th scope="col" class="wd-mp-h-actual"><span class="wd-mp-hlabel">@Icon("bars")Actual</span></th><th scope="col" class="wd-mp-h-balance"><span class="wd-mp-hlabel">@Icon("scale")Balance</span></th></tr></thead>
-                        <tbody>
-                            @foreach (var row in mp.Rows)
-                            {
-                                var kind = row.Kind switch
-                                {
-                                    WorkforceDashboardService.ManpowerRowKind.Subtotal => "wd-mp-sub",
-                                    WorkforceDashboardService.ManpowerRowKind.Staff => "wd-mp-grey",
-                                    WorkforceDashboardService.ManpowerRowKind.DirectLabor => "wd-mp-direct",
-                                    WorkforceDashboardService.ManpowerRowKind.GrandSubtotal => "wd-mp-sub",
-                                    WorkforceDashboardService.ManpowerRowKind.GrandTotal => "wd-mp-grand",
-                                    _ => "wd-mp-line"
-                                };
-                                var pill = row.Balance switch { null => "none", < 0 => "neg", 0 => "zero", _ => "pos" };
-                                var balance = row.Balance is int b ? (b < 0 ? "(" + (-b).ToString("N0") + ")" : b.ToString("N0")) : "-";
-                                <tr class="@kind"><th scope="row"><span class="wd-mp-label"><span class="wd-mp-badge">@Icon(RowIcon(row))</span>@row.Label</span></th><td class="wd-mp-target">@row.Target.ToString("N0")</td><td class="wd-mp-blue">@row.Actual.ToString("N0")</td><td><span class="wd-pill wd-pill-@pill">@balance</span></td></tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-                <p class="wd-method-note">Actual is the headcount on the last day of the period by job grade (51T-52T per workshop, 53T-55T per line) across all workshops. Balance = Actual − New target.</p>
-            </section>
+            <partial name="_ManpowerTables" model="mp" />
         </div>
 
         <div class="wd-side-panels">
             <section class="wd-card wd-leave-chart" aria-labelledby="leave-chart-title">
-                <div class="wd-panel-heading"><div><h2 id="leave-chart-title">Leave by type</h2><p>Share of confirmed leave hours</p></div></div>
-                @if (report.LeaveRows.Count == 0)
-                {
-                    <p class="wd-empty">No leave recorded for this selection.</p>
+                <div class="wd-panel-heading"><div><h2 id="leave-chart-title">Leave ratio</h2><p>Average of daily % of manpower on leave · @periodLabel</p></div></div>
+                @{
+                    var maxRatio = Model.LeaveRatios.Max(x => x.Ratio);
                 }
-                else
-                {
-                    <div class="wd-bars">
-                        @foreach (var row in report.LeaveRows)
-                        {
-                            <div class="wd-bar-row"><span>@row.Name</span><div class="wd-bar-track" role="img" aria-label="@row.Name: @row.Rate.ToString("N1") percent of leave hours"><span style="width:@row.Rate.ToString("0.##", CultureInfo.InvariantCulture)%"></span></div><strong>@row.Rate.ToString("N1")%</strong></div>
-                        }
-                    </div>
-                }
+                <div class="wd-bars">
+                    @foreach (var row in Model.LeaveRatios)
+                    {
+                        var width = maxRatio == 0 ? 0 : row.Ratio / maxRatio * 100m;
+                        <div class="wd-bar-row@(row.IsTotal ? " wd-bar-total" : "")"><span>@row.Name</span><div class="wd-bar-track" role="img" aria-label="@row.Name: @row.Ratio.ToString("P2") of manpower"><span style="width:@width.ToString("0.##", CultureInfo.InvariantCulture)%"></span></div><strong>@row.Ratio.ToString("P2")</strong></div>
+                    }
+                </div>
+                <p class="wd-method-note">Same figure as the Absent Ratio report: people on each leave type ÷ all A, B and C shift manpower per day, averaged over the days of the chosen period (up to today). Day shift and the Pregnant group are not counted.</p>
             </section>
 
             <section class="wd-card wd-high-leave" aria-labelledby="high-leave-title">
                 <div class="wd-panel-heading">
-                    <div><h2 id="high-leave-title">High leave rate by workshop</h2><p>Employees with a leave rate above 5% this month</p></div>
+                    <div><h2 id="high-leave-title">High leave rate by workshop</h2><p>Employees with a leave rate above 5% · @periodLabel</p></div>
                     <span class="wd-alert-count">@report.HighLeaveEmployees.Count.ToString("N0") employees need review</span>
                 </div>
                 <div class="wd-table-wrap wd-high-leave-scroll" tabindex="0" role="region" aria-label="High leave rate by workshop, scrollable">
@@ -196,7 +116,7 @@
                         {
                             @foreach (var row in report.WorkshopRows)
                             {
-                                <tr><td class="wd-workshop-name" title="@row.Name">@row.Name</td><td><strong>@row.Count.ToString("N0")</strong></td><td><a asp-page="/HighLeave" asp-route-month="@report.Month" asp-route-workshopId="@row.Id">View <span aria-hidden="true">→</span><span class="visually-hidden"> employees in @row.Name</span></a></td></tr>
+                                <tr><td class="wd-workshop-name" title="@row.Name">@row.Name</td><td><strong>@row.Count.ToString("N0")</strong></td><td><a asp-page="/HighLeave" asp-route-month="@report.Month" asp-route-period="@mp.Period" asp-route-workshopId="@row.Id">View <span aria-hidden="true">→</span><span class="visually-hidden"> employees in @row.Name</span></a></td></tr>
                             }
                         }
                         </tbody>
@@ -207,7 +127,7 @@
 
             <section class="wd-card wd-high-leave wd-resigned" aria-labelledby="resigned-title">
                 <div class="wd-panel-heading">
-                    <div><h2 id="resigned-title">Resigned employees</h2><p>Last working day in @monthLabel</p></div>
+                    <div><h2 id="resigned-title">Resigned employees</h2><p>Last working day in @monthLabel (whole month, not affected by the period)</p></div>
                     <span class="wd-alert-count">@report.ResignedEmployees.Count.ToString("N0") resigned</span>
                 </div>
                 <div class="wd-table-wrap wd-high-leave-scroll" tabindex="0" role="region" aria-label="Resigned employees, scrollable">
@@ -228,7 +148,7 @@
                         </tbody>
                     </table>
                 </div>
-                <p class="wd-method-note">@(report.ResignedEmployees.Count > 5 ? $"Latest 5 of {report.ResignedEmployees.Count} shown; scroll for the rest. " : "")Follows the month and workshop filters above.</p>
+                <p class="wd-method-note">@(report.ResignedEmployees.Count > 5 ? $"Latest 5 of {report.ResignedEmployees.Count} shown; scroll for the rest. " : "")Follows the month and workshop filters above, but not the period.</p>
             </section>
 
             <section class="wd-card wd-actions" aria-labelledby="actions-title">

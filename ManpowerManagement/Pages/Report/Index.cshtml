@@ -1,0 +1,296 @@
+@page
+@model ManpowerManagement.Pages.Report.IndexModel
+@using System.Globalization
+@using System.Text
+@using Microsoft.AspNetCore.Html
+@using ManpowerManagement.Services
+@{
+    var isAttendance = Model.Type == IndexModel.Attendance;
+    var isAbsent = Model.Type == IndexModel.Absent;
+    var isHours = Model.Type == IndexModel.Hours;
+    var isEmployees = Model.Type == IndexModel.Employees;
+    var isSummary = Model.Type == IndexModel.Summary;
+    var reportTitle = Model.Type switch
+    {
+        IndexModel.Absent => "Absent Ratio",
+        IndexModel.Hours => "Working Hour",
+        IndexModel.Employees => "Employee List",
+        IndexModel.Summary => "Summary",
+        _ => "Attendance (Monthly)"
+    };
+    ViewData["Title"] = reportTitle;
+    string CellClass(string text) => text switch
+    {
+        "" => "",
+        "OFF" => "rp-off",
+        ReportService.Resigned => "rp-resigned",
+        _ when decimal.TryParse(text, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out _) => "",
+        _ => "rp-leave"
+    };
+
+    // Line chart of one daily series across the whole month: gridlines, the points (hover for the numbers) and the dashed month average.
+    IHtmlContent LeaveChart(IndexModel.LeaveSeries series)
+    {
+        const double width = 960, height = 230, left = 52, right = 64, top = 16, bottom = 30;
+        var days = Model.LeaveTrend.Days;
+        var inv = CultureInfo.InvariantCulture;
+        var peak = (double)Math.Max(series.Points.Count == 0 ? 0 : series.Points.Max(p => p.Ratio), series.Average);
+        double[] steps = [0.005, 0.01, 0.02, 0.025, 0.05, 0.1, 0.2, 0.25, 0.5, 1];
+        var step = steps.FirstOrDefault(x => peak / x <= 4, 1);
+        var ceiling = Math.Max(Math.Ceiling(peak / step), 1) * step;
+        double X(DateOnly d) => days.Count < 2 ? left : left + (d.Day - 1) * (width - left - right) / (days.Count - 1);
+        double Y(double v) => top + (height - top - bottom) * (1 - v / ceiling);
+        string F(double v) => v.ToString("0.#", inv);
+        var svg = new StringBuilder();
+        svg.Append($"<svg class=\"rp-chart-svg\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-label=\"{series.Title}: daily share of manpower, month average {series.Average:P2}\">");
+        for (var v = 0.0; v <= ceiling + step / 2; v += step)
+            svg.Append($"<line class=\"rp-grid\" x1=\"{F(left)}\" x2=\"{F(width - right)}\" y1=\"{F(Y(v))}\" y2=\"{F(Y(v))}\"/><text class=\"rp-axis\" x=\"{F(left - 8)}\" y=\"{F(Y(v) + 4)}\" text-anchor=\"end\">{v.ToString(step < 0.01 ? "P1" : "P0", inv)}</text>");
+        foreach (var d in days)
+            svg.Append($"<text class=\"rp-axis\" x=\"{F(X(d))}\" y=\"{F(height - 10)}\" text-anchor=\"middle\">{d.Day}</text>");
+        if (series.Points.Count > 0)
+        {
+            svg.Append($"<polyline class=\"rp-line\" points=\"{string.Join(' ', series.Points.Select(p => $"{F(X(p.Date))},{F(Y((double)p.Ratio))}"))}\"/>");
+            foreach (var p in series.Points)
+                svg.Append($"<circle class=\"rp-dot\" cx=\"{F(X(p.Date))}\" cy=\"{F(Y((double)p.Ratio))}\" r=\"3.5\"><title>{p.Date:ddd dd MMM}: {p.Ratio:P2} ({p.Leave} of {p.Manpower} people)</title></circle>");
+            svg.Append($"<line class=\"rp-avg\" x1=\"{F(left)}\" x2=\"{F(width - right)}\" y1=\"{F(Y((double)series.Average))}\" y2=\"{F(Y((double)series.Average))}\"/><text class=\"rp-avg-label\" x=\"{F(width - right + 6)}\" y=\"{F(Y((double)series.Average) + 4)}\">avg {series.Average:P2}</text>");
+        }
+        svg.Append("</svg>");
+        return Html.Raw(svg.ToString());
+    }
+}
+
+<div class="workforce-dashboard rp-page">
+    <div class="wd-heading">
+        <div>
+            <h1>@reportTitle</h1>
+            <p>View and download this report as Excel. No login needed.</p>
+        </div>
+    </div>
+
+    <form class="rp-filters" method="get">
+        <input type="hidden" name="type" value="@Model.Type" />
+        @if (isAttendance || isAbsent || isSummary)
+        {
+            <div class="wd-filter-field"><label for="rpMonth">Month</label><input id="rpMonth" type="month" name="month" value="@Model.Month" /></div>
+        }
+        @if (isSummary)
+        {
+            <div class="wd-filter-field"><label for="rpPeriod">Period</label>
+                <select id="rpPeriod" name="period">@foreach (var o in Model.DashboardReport.Manpower.Periods) { <option value="@o.Key" selected="@(o.Key == Model.Period)" disabled="@(!o.Available)">@o.Label (@o.Range)</option> }</select></div>
+        }
+        @if (isHours)
+        {
+            <div class="wd-filter-field"><label for="rpFrom">From</label><input id="rpFrom" type="date" name="from" value="@Model.From?.ToString("yyyy-MM-dd")" /></div>
+            <div class="wd-filter-field"><label for="rpTo">To</label><input id="rpTo" type="date" name="to" value="@Model.To?.ToString("yyyy-MM-dd")" /></div>
+        }
+        @if (!isSummary)
+        {
+        <div class="wd-filter-field"><label for="rpWorkshop">Workshop</label>
+            <select id="rpWorkshop" name="workshopId"><option value="">All</option>@foreach (var o in Model.WorkshopOptions) { <option value="@o.Value" selected="@(o.Value == Model.WorkshopId?.ToString())">@o.Text</option> }</select></div>
+        <div class="wd-filter-field"><label for="rpShift">Shift</label>
+            <select id="rpShift" name="shift"><option value="">All</option>@foreach (var s in isEmployees ? IndexModel.Shifts : IndexModel.ReportShifts) { <option value="@s" selected="@(s == Model.Shift)">@s</option> }</select></div>
+        }
+        @if (isAttendance)
+        {
+            <div class="wd-filter-field"><label for="rpGroup">Special group</label>
+                <select id="rpGroup" name="specialGroupId"><option value="">All</option>@foreach (var o in Model.SpecialGroupOptions) { <option value="@o.Value" selected="@(o.Value == Model.SpecialGroupId?.ToString())">@o.Text</option> }</select></div>
+        }
+        @if (isEmployees)
+        {
+            <div class="wd-filter-field"><label for="rpState">Status</label>
+                <select id="rpState" name="state">
+                    <option value="">All</option>
+                    <option value="Active" selected="@(Model.State == "Active")">Active</option>
+                    <option value="Resigned" selected="@(Model.State == "Resigned")">Resigned</option>
+                </select></div>
+        }
+        <button class="wd-apply" type="submit">Show</button>
+        <a class="wh-export" asp-page-handler="Download" asp-route-type="@Model.Type" asp-route-month="@Model.Month" asp-route-period="@(isSummary ? Model.Period : null)"
+           asp-route-from="@Model.From?.ToString("yyyy-MM-dd")" asp-route-to="@Model.To?.ToString("yyyy-MM-dd")"
+           asp-route-workshopId="@Model.WorkshopId" asp-route-shift="@Model.Shift" asp-route-state="@Model.State" asp-route-specialGroupId="@(isAttendance ? Model.SpecialGroupId : null)">Download Excel</a>
+    </form>
+
+    <details class="ag-help">
+        <summary>About this report</summary>
+        <ul>
+        @if (isSummary)
+        {
+            <li>The same Headcount Summary and Work Station Performance tables as the Dashboard, for the production floor as a whole (no workshop or shift filter).</li>
+            <li>Headcount is taken on the last day of the month, or on the latest business day for the current month (MTD).</li>
+            <li>Pick a Period (MTD or Week 1, Week 2 ...) to take the headcount on the last day of that week instead. Weeks run Monday to Sunday and are cut at the month boundaries, so the first and last week can be short. A week that has not started yet cannot be chosen, and the current week counts up to today.</li>
+            <li>Download Excel gives one sheet with both tables in the same colours and layout as the Dashboard.</li>
+        }
+        else if (isAttendance)
+        {
+            <li>Shows the same values as the Attendance grid for the calendar month, including changes that leaders keyed but that are not yet copied to SQL (07:00 and 19:00).</li>
+            <li>Cell codes: hours (e.g. <code>10.67</code>), <code>OFF</code>, leave <code>AL SL BL OL AB ML</code> (a number after the code is the leave hours), <code>Resigned</code> after the last working day.</li>
+            <li>Employees in the Pregnant group are recorded on their own page, so they are not listed unless Special group = Pregnant. Day shift is not included.</li>
+            <li>Special group filters the list to the members of that group. For Pregnant the cells follow the Pregnant page: 8 hours Monday to Friday, OFF on weekends.</li>
+        }
+        else if (isAbsent)
+        {
+            <li>Each % = people on that leave type that day ÷ all manpower that day. Manpower = every employee of shifts A, B and C who was employed that day (people on OFF included). Day shift is not counted.</li>
+            <li>One card per leave type (AL SL BL OL AB ML) with its month average. The first chart is Total leave = all six types. A person counts once per day, whatever the leave hours.</li>
+            <li>The month average is the average of the daily %. Only days up to the current business day are included. Hover a point to see the people count.</li>
+            <li>Uses the same data as the monthly attendance report, including changes not yet copied to SQL. Employees in the Pregnant group are not counted here.</li>
+            <li>Switch on "Exclude AL" above the Total leave chart to draw the line without annual leave.</li>
+            <li>Download Excel gives the raw table: one row per day, workshop and shift with the manpower, the number of people on each leave type, Total leave including and excluding AL, then each type as a % of manpower (%AL %SL %BL %OL %AB %ML) and %Total Leave including and excluding AL.</li>
+        }
+        else if (isHours)
+        {
+            <li>Total / Indirect / Direct hours per day, workshop and shift (A, B and C; Day shift is not included). Only closed business days have hours (the day closes at 07:00 and 19:00).</li>
+            <li>Direct hours = Total − Indirect.</li>
+            <li>Headcount (HC) = people who worked that shift that day. Indirect HC includes the leaders present; Direct HC = Total HC − Indirect HC. The cards show the average people per day over the chosen dates.</li>
+        }
+        else
+        {
+            <li>Everyone in the employee master. Telephone, accommodation and remarks are not included in this public report.</li>
+        }
+        </ul>
+    </details>
+
+    @if (isSummary)
+    {
+        <p class="rp-count">@Model.DashboardReport.AsOfNote</p>
+        <div class="wd-main-panels"><partial name="_ManpowerTables" model="Model.DashboardReport.Manpower" /></div>
+    }
+    @if (isAbsent)
+    {
+        <section class="wd-kpis rp-kpis" aria-label="Leave summary">
+            @foreach (var series in Model.LeaveSeriesList.Where(s => s.Code != IndexModel.TotalCode))
+            {
+                var latest = series.Points.LastOrDefault();
+                <article class="wd-card wd-kpi rp-c-@series.Code">
+                    <span class="wd-kpi-icon" aria-hidden="true">@series.Code</span>
+                    <div>
+                        <h2>@series.Title</h2>
+                        <strong>@series.Average.ToString("P2")</strong>
+                        <p>Month average of daily % · @series.Detail@(latest is null ? "" : $" · latest {latest.Date:dd/MM}: {latest.Ratio:P2}")</p>
+                    </div>
+                </article>
+            }
+        </section>
+        @if (Model.LeaveTrend.Rows.Count == 0)
+        {
+            <section class="wd-card rp-chart"><p class="text-center text-muted py-4 mb-0">No days with attendance yet in this month.</p></section>
+        }
+        else
+        {
+            @foreach (var series in Model.LeaveSeriesList)
+            {
+                <section class="wd-card rp-chart rp-c-@series.Code" aria-label="@series.Title per day" data-rp-toggle-scope>
+                    <div class="wd-panel-heading">
+                        <div><h2>@series.Title per day</h2><p>@series.Detail as % of all manpower (A, B, C shifts)</p></div>
+                        <div class="rp-chart-tools">
+                            @if (series.WithoutAl is not null)
+                            {
+                                <label class="rp-toggle"><input type="checkbox" class="rp-exclude-al" /><span class="rp-toggle-track" aria-hidden="true"></span>Exclude AL</label>
+                            }
+                            <span class="wd-alert-count" data-rp-variant="all">Month average @series.Average.ToString("P2")</span>
+                            @if (series.WithoutAl is not null)
+                            {
+                                <span class="wd-alert-count" data-rp-variant="noal" hidden>Month average excl. AL @series.WithoutAl.Average.ToString("P2")</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="rp-chart-scroll" data-rp-variant="all">@LeaveChart(series)</div>
+                    @if (series.WithoutAl is not null)
+                    {
+                        <div class="rp-chart-scroll" data-rp-variant="noal" hidden>@LeaveChart(series.WithoutAl)</div>
+                    }
+                </section>
+            }
+        }
+    }
+    @if (isHours)
+    {
+        <section class="wd-kpis" aria-label="Hours summary">
+            <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">Σ</span><div><h2>Total hours</h2><strong>@Model.TotalHours.ToString("N2")</strong></div></article>
+            <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">I</span><div><h2>Indirect hours</h2><strong>@Model.IndirectHours.ToString("N2")</strong></div></article>
+            <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">D</span><div><h2>Direct hours</h2><strong>@Model.DirectHours.ToString("N2")</strong></div></article>
+        </section>
+        <section class="wd-kpis" aria-label="Headcount summary">
+            <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">Σ</span><div><h2>Total headcount</h2><strong>@Model.AvgTotalCount.ToString("N1")</strong><p>Average people per day</p></div></article>
+            <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">I</span><div><h2>Indirect headcount</h2><strong>@Model.AvgIndirectCount.ToString("N1")</strong><p>Average people per day</p></div></article>
+            <article class="wd-card wd-kpi"><span class="wd-kpi-icon wd-icon-blue" aria-hidden="true">D</span><div><h2>Direct headcount</h2><strong>@Model.AvgDirectCount.ToString("N1")</strong><p>Average people per day</p></div></article>
+        </section>
+    }
+
+    @if (!isAbsent && !isSummary)
+    {
+    <section class="wd-card wh-table-card">
+        <p class="rp-count">@Model.TotalRows.ToString("N0") rows@(Model.TotalRows > IndexModel.PreviewLimit ? $" — showing the first {IndexModel.PreviewLimit}. Download Excel for all rows." : "")</p>
+        <div class="wd-table-wrap">
+            @if (isAttendance)
+            {
+                <table class="wd-table rp-table">
+                    <thead><tr><th>Emp ID</th><th>Employee</th><th>Workshop</th><th>Shift</th>@foreach (var d in Model.AttendanceTable.Days) { <th class="rp-day">@d.ToString("dd")<small>@d.ToString("ddd")</small></th> }<th class="text-end">Worked h</th><th class="text-end">Leave h</th>@foreach (var (w, i) in (Model.AttendanceTable.Weeks ?? []).Select((w, i) => (w, i))) { <th class="text-end text-nowrap">Wk @(i + 1)<small>@w.Label</small></th> }<th>Remarks</th></tr></thead>
+                    <tbody>
+                    @foreach (var r in Model.AttendanceTable.Rows.Take(IndexModel.PreviewLimit))
+                    {
+                        <tr>
+                            <td class="text-nowrap">@r.Code</td><td class="text-nowrap">@r.Name</td><td class="text-nowrap">@r.Workshop</td><td>@r.Shift</td>
+                            @foreach (var c in r.Cells) { <td class="rp-cell @CellClass(c)">@c</td> }
+                            <td class="text-end">@r.WorkedHours.ToString("N2")</td><td class="text-end">@r.LeaveHours.ToString("N2")</td>@foreach (var h in r.WeekHours ?? []) { <td class="text-end">@h.ToString("N2")</td> }<td class="rp-remarks">@r.Remarks</td>
+                        </tr>
+                    }
+                    @if (!Model.AttendanceTable.Rows.Any()) { <tr><td colspan="@(Model.AttendanceTable.Days.Count + 7 + (Model.AttendanceTable.Weeks?.Count ?? 0))" class="text-center text-muted py-4">No employees found for this selection.</td></tr> }
+                    </tbody>
+                </table>
+            }
+            else if (isHours)
+            {
+                <table class="wd-table wh-table">
+                    <thead><tr><th>Date</th><th>Workshop</th><th>Shift</th><th class="text-end">Total hours</th><th class="text-end">Indirect hours</th><th class="text-end">Direct hours</th><th class="text-end">Total HC</th><th class="text-end">Indirect HC</th><th class="text-end">Direct HC</th></tr></thead>
+                    <tbody>
+                    @foreach (var r in Model.HoursRows.Take(IndexModel.PreviewLimit))
+                    {
+                        <tr><td class="text-nowrap">@r.Date.ToString("yyyy-MM-dd")</td><td>@r.Workshop</td><td>@r.Shift</td><td class="text-end">@r.Total.ToString("N2")</td><td class="text-end">@r.Indirect.ToString("N2")</td><td class="text-end fw-semibold @(r.Direct < 0 ? "text-danger" : "")">@r.Direct.ToString("N2")</td><td class="text-end">@r.TotalCount</td><td class="text-end">@r.IndirectCount</td><td class="text-end fw-semibold @(r.DirectCount < 0 ? "text-danger" : "")">@r.DirectCount</td></tr>
+                    }
+                    @if (!Model.HoursRows.Any()) { <tr><td colspan="9"class="text-center text-muted py-4">No closed days in this date range yet.</td></tr> }
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <table class="wd-table wh-table">
+                    <thead><tr><th>Emp ID</th><th>Name</th><th>Job Grade</th><th>Process</th><th>Workshop</th><th>Shift</th><th>Status</th><th>Start Date</th><th>Resigned Date</th><th>New</th><th>Special Groups</th></tr></thead>
+                    <tbody>
+                    @foreach (var r in Model.EmployeeRows.Take(IndexModel.PreviewLimit))
+                    {
+                        <tr><td class="text-nowrap">@r.Code</td><td class="text-nowrap">@r.Name</td><td>@r.JobGrade</td><td>@r.Process</td><td class="text-nowrap">@r.Workshop</td><td>@r.Shift</td><td>@r.Status</td><td class="text-nowrap">@r.StartDate.ToString("yyyy-MM-dd")</td><td class="text-nowrap">@r.ResignedDate?.ToString("yyyy-MM-dd")</td><td>@(r.IsNewEmployee ? "Yes" : "No")</td><td>@r.Groups</td></tr>
+                    }
+                    @if (!Model.EmployeeRows.Any()) { <tr><td colspan="11" class="text-center text-muted py-4">No employees found for this selection.</td></tr> }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </section>
+    }
+</div>
+
+@section Scripts {
+    <script>
+        // "Exclude AL" on the Total leave chart: swaps the chart and its month average between the two precomputed variants.
+        (function () {
+            var key = 'rpExcludeAl';
+            var saved = false;
+            try { saved = localStorage.getItem(key) === '1'; } catch (e) { }
+            document.querySelectorAll('[data-rp-toggle-scope]').forEach(function (scope) {
+                var box = scope.querySelector('.rp-exclude-al');
+                if (!box) return;
+                function apply() {
+                    scope.querySelectorAll('[data-rp-variant]').forEach(function (el) {
+                        el.hidden = el.getAttribute('data-rp-variant') !== (box.checked ? 'noal' : 'all');
+                    });
+                }
+                box.checked = saved;
+                box.addEventListener('change', function () {
+                    try { localStorage.setItem(key, box.checked ? '1' : '0'); } catch (e) { }
+                    apply();
+                });
+                apply();
+            });
+        })();
+    </script>
+}

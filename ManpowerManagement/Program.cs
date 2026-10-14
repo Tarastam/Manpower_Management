@@ -15,6 +15,7 @@ builder.Services.Configure<FormOptions>(options =>
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<LeaderSessionService>();
 builder.Services.AddScoped<WorkforceDashboardService>();
+builder.Services.AddScoped<ReportService>();
 builder.Services.AddSingleton<AttendanceStagingStore>();
 builder.Services.AddScoped<EffectiveAttendance>();
 builder.Services.AddScoped<DailyHoursService>();
@@ -32,7 +33,16 @@ builder.Services.AddDbContext<AppDbContext>(options =>
             // EF Core 8 translates list.Contains(...) to OPENJSON ... WITH and SQL Server rejects it.
             sqlOptions.UseCompatibilityLevel(120);
         }));
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+    {
+        // No password complexity rules for admin / approver accounts.
+        options.Password.RequireDigit = false;
+        options.Password.RequireLowercase = false;
+        options.Password.RequireUppercase = false;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequiredLength = 1;
+        options.Password.RequiredUniqueChars = 0;
+    })
     .AddEntityFrameworkStores<AppDbContext>()
     .AddDefaultTokenProviders();
 builder.Services.ConfigureApplicationCookie(options => options.LoginPath = "/Account/Login");

@@ -21,8 +21,16 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
     {
         public int Total => First + Second;
     }
+    // One choice of the period picker above the summary tables: MTD or a week of the month (Monday to Sunday, cut at the month
+    // boundaries). AsOf is the day the headcount is taken on; a period that has not started yet is not Available.
+    public record PeriodOption(string Key, string Label, string Range, DateOnly From, DateOnly AsOf, bool Available);
+    public const string Mtd = "mtd";
     public sealed class ManpowerSummary
     {
+        public string Period { get; init; } = Mtd;
+        public string PeriodLabel { get; init; } = "MTD";
+        public DateOnly? AsOf { get; init; }
+        public List<PeriodOption> Periods { get; init; } = [];
         public int FirstHeadcount { get; init; }
         public int SecondHeadcount { get; init; }
         public int TotalHeadcount => FirstHeadcount + SecondHeadcount;
@@ -36,6 +44,8 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
     public sealed class Report
     {
         public string Month { get; init; } = "";
+        // The days the figures cover: PeriodStart up to (not including) PeriodEnd. A week stops at its last day or today.
+        public DateOnly PeriodStart { get; init; }
         public DateOnly PeriodEnd { get; init; }
         public int? WorkshopId { get; init; }
         public string WorkshopLabel { get; init; } = "Total Production";
@@ -52,7 +62,42 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
         public List<ResignedEmployee> ResignedEmployees { get; init; } = [];
         public List<WorkshopSummary> WorkshopRows { get; init; } = [];
         public ManpowerSummary Manpower { get; init; } = new();
+
+        // The line under the summary tables and in the Excel download: which day the headcount is taken on.
+        public string AsOfNote
+        {
+            get
+            {
+                if (Manpower.Period == Mtd && PeriodEnd == DateOnly.Parse(Month + "-01")) return "No reporting days yet";
+                var asOf = Manpower.AsOf ?? PeriodEnd.AddDays(-1);
+                var text = "Headcount as of " + asOf.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+                return Manpower.Period == Mtd ? text : $"{Manpower.PeriodLabel} · {text}";
+            }
+        }
     }
+
+    // MTD first, then one entry per week of the month. today is the current business day.
+    public static List<PeriodOption> PeriodOptions(DateOnly monthStart, DateOnly today)
+    {
+        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        var options = new List<PeriodOption>
+        {
+            new(Mtd, "MTD", $"{monthStart:dd/MM}-{(today < monthEnd ? today : monthEnd):dd/MM}", monthStart, today < monthEnd ? today : monthEnd, today >= monthStart)
+        };
+        var from = monthStart;
+        for (var number = 1; from <= monthEnd; number++)
+        {
+            var to = from;
+            while (to < monthEnd && to.DayOfWeek != DayOfWeek.Sunday) to = to.AddDays(1);
+            options.Add(new($"w{number}", $"Week {number}", $"{from:dd/MM}-{to:dd/MM}", from, today < to ? today : to, today >= from));
+            from = to.AddDays(1);
+        }
+        return options;
+    }
+
+    // An unknown key, or a week that has not started, falls back to MTD.
+    public static PeriodOption ResolvePeriod(List<PeriodOption> options, string? key) =>
+        options.FirstOrDefault(x => x.Available && x.Key.Equals(key, StringComparison.OrdinalIgnoreCase)) ?? options[0];
 
     // Fixed headcount targets per production workshop (label shown, workshop name, target).
     static readonly (string Label, string Workshop, int Target)[] ChemicalTargets =
@@ -72,7 +117,7 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
 
     // Headcount on the last day of the period for the whole production floor, independent of the workshop filter.
     // Rows are split by job grade: 51T-52T per workshop, and 53T-55T for the whole Chemical / Assembly line.
-    async Task<ManpowerSummary> BuildManpowerAsync(List<Workshop> workshops, DateOnly asOf)
+    async Task<ManpowerSummary> BuildManpowerAsync(List<Workshop> workshops, DateOnly asOf, PeriodOption period, List<PeriodOption> periods)
     {
         var people = await db.Employees.AsNoTracking()
             .Where(x => x.StartDate <= asOf && (x.ResignedDate == null ? x.EmploymentState == EmploymentState.Active : x.ResignedDate >= asOf))
@@ -117,6 +162,7 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
             direct.Count(x => scope.Contains(x.CurrentWorkshopId) && x.Keys.Any(match));
         return new ManpowerSummary
         {
+            Period = period.Key, PeriodLabel = period.Label, AsOf = asOf, Periods = periods,
             FirstHeadcount = chemicalSub.Actual, SecondHeadcount = assemblySub.Actual,
             Support = groups.Select(g => new SupportRow(g.Name, g.ColorHex, Tagged(firstScope, k => k == g.Name), Tagged(secondScope, k => k == g.Name))).ToList(),
             FirstSupport = Tagged(firstScope, names.Contains),
@@ -131,13 +177,20 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
             ? date.ToString("yyyy-MM")
             : BusinessDateService.Current().ToString("yyyy-MM");
 
-    public async Task<Report> LoadAsync(string? month, int? workshopId)
+    // period: "mtd" (default) or "w1", "w2" ... to cover just that week of the month. Every figure follows it except the
+    // Resigned employees list, which always shows the whole month.
+    public async Task<Report> LoadAsync(string? month, int? workshopId, string? period = null)
     {
         var selectedMonth = NormalizeMonth(month);
         var start = DateOnly.Parse(selectedMonth + "-01");
         var end = start.AddMonths(1);
         var today = BusinessDateService.Current();
-        var periodEnd = end <= today ? end : start > today ? start : today.AddDays(1);
+        var mtdEnd = end <= today ? end : start > today ? start : today.AddDays(1);
+        var periods = PeriodOptions(start, today);
+        var chosen = ResolvePeriod(periods, period);
+        var isMtd = chosen.Key == Mtd;
+        var rangeStart = isMtd ? start : chosen.From;
+        var periodEnd = isMtd ? mtdEnd : chosen.AsOf.AddDays(1);
         var workshops = await db.Workshops.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
         if (workshopId is not null && workshops.All(x => x.Id != workshopId)) workshopId = null;
         var scope = workshopId is int id ? DescendantIds(workshops, id) : null;
@@ -147,7 +200,7 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
         // Everyone who was employed on at least one day of the period: current staff, plus people whose last working day
         // (ResignedDate) falls on or after the first day of the period. Resigned with no date cannot be placed in time.
         var employeeQuery = db.Employees.AsNoTracking()
-            .Where(x => x.ResignedDate == null ? x.EmploymentState == EmploymentState.Active : x.ResignedDate >= start);
+            .Where(x => x.ResignedDate == null ? x.EmploymentState == EmploymentState.Active : x.ResignedDate >= rangeStart);
         if (scope is not null) employeeQuery = employeeQuery.Where(x => scope.Contains(x.CurrentWorkshopId));
         var employees = await employeeQuery.Select(x => new
         {
@@ -159,17 +212,17 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
         var headcount = employees.Count(x => x.ResignedDate is null || x.ResignedDate >= lastDayOfPeriod);
 
         var entryQuery = db.AttendanceEntries.AsNoTracking()
-            .Where(x => x.BusinessDate >= start && x.BusinessDate < periodEnd);
+            .Where(x => x.BusinessDate >= rangeStart && x.BusinessDate < periodEnd);
         if (scope is not null) entryQuery = entryQuery.Where(x => scope.Contains(x.WorkshopId));
         // Changes still waiting for the 07:00 / 19:00 copy to SQL are included, so the dashboard is current.
-        var entries = staging.Overlay(await entryQuery.ToListAsync(), start, periodEnd.AddDays(-1), c => scope is null || scope.Contains(c.WorkshopId));
+        var entries = staging.Overlay(await entryQuery.ToListAsync(), rangeStart, periodEnd.AddDays(-1), c => scope is null || scope.Contains(c.WorkshopId));
         var calendarQuery = db.WorkCalendars.AsNoTracking()
-            .Where(x => x.WorkDate >= start && x.WorkDate < periodEnd);
+            .Where(x => x.WorkDate >= rangeStart && x.WorkDate < periodEnd);
         if (scope is not null) calendarQuery = calendarQuery.Where(x => scope.Contains(x.WorkshopId));
         var calendar = (await calendarQuery.ToListAsync())
             .ToDictionary(x => (x.WorkshopId, x.WorkDate), x => x.IsWorkingDay);
-        var dates = Enumerable.Range(0, periodEnd.DayNumber - start.DayNumber)
-            .Select(i => start.AddDays(i)).ToList();
+        var dates = Enumerable.Range(0, periodEnd.DayNumber - rangeStart.DayNumber)
+            .Select(i => rangeStart.AddDays(i)).ToList();
         bool IsScheduled(int ws, string shift, DateOnly day) =>
             calendar.TryGetValue((ws, day), out var working)
                 ? working : !Pages.Attendance.IndexModel.IsDefaultOffDay(shift, day);
@@ -234,12 +287,13 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
             .Select(x => new ResignedEmployee(x.EmployeeId, x.FullName,
                 workshops.FirstOrDefault(w => w.Id == x.CurrentWorkshopId)?.Name ?? "Unknown", x.ResignedDate!.Value))
             .ToList();
-        var resigned = resignedPeople.Count;
+        // Turnover counts the resignations inside the chosen period; the list above keeps the whole month.
+        var resigned = isMtd ? resignedPeople.Count : resignedPeople.Count(x => x.ResignedDate >= rangeStart && x.ResignedDate < periodEnd);
         var turnoverDenominator = headcount + resigned / 2m;
 
         return new Report
         {
-            Month = selectedMonth, PeriodEnd = periodEnd, WorkshopId = workshopId,
+            Month = selectedMonth, PeriodStart = rangeStart, PeriodEnd = periodEnd, WorkshopId = workshopId,
             WorkshopLabel = workshopName, Workshops = workshops, Headcount = headcount,
             ScheduledPersonDays = scheduledPersonDays, PresentPersonDays = presentPersonDays,
             AttendanceRate = scheduledPersonDays == 0 ? 0 : presentPersonDays * 100m / scheduledPersonDays,
@@ -247,7 +301,7 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
             TurnoverRate = turnoverDenominator == 0 ? 0 : resigned * 100m / turnoverDenominator,
             ResignedEmployees = resignedPeople,
             LeaveRows = leaveRows, HighLeaveEmployees = highLeave, WorkshopRows = workshopRows,
-            Manpower = await BuildManpowerAsync(workshops, lastDayOfPeriod)
+            Manpower = await BuildManpowerAsync(workshops, lastDayOfPeriod, chosen, periods)
         };
     }
 
