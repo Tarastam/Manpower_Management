@@ -1,4 +1,3 @@
-using System.Text;
 using ManpowerManagement.Data;
 using ManpowerManagement.Models;
 using ManpowerManagement.Services;
@@ -28,6 +27,10 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
     [TempData] public string? Message { get; set; }
     public string? Error { get; set; }
     public bool CanDelete => User.IsInRole(Roles.Admin) || User.IsInRole(Roles.Approver);
+    // Employees at job grade 59T and above can only be edited by Admin or an Approver.
+    public bool CanEditSenior => User.IsInRole(Roles.Admin) || User.IsInRole(Roles.Approver);
+    public bool IsLocked(Employee employee) => !CanEditSenior && JobGrades.RequiresApprover(employee.JobGrade);
+    const string SeniorDenied = "Employees at job grade 59T and above can only be added or edited by an Admin or an Approver.";
 
     // Choosing No is open to everyone, but setting or changing the New Employee tag to Yes is limited: Admin may tag any
     // line, a checked-in leader only their own line (the same workshops they can key attendance for).
@@ -50,7 +53,7 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
     const string ResignedByTicketOnly = "Status cannot be set here. Leave it blank or Active; an employee becomes Resigned only through an approved Resignation Ticket, on its effective date.";
     const string TagDenied = "Only Admin, or a leader checked in for this workshop's line, can set New Employee to Yes or change the tag. Log in as Admin or use Leader check-in first.";
 
-    public async Task OnGetAsync(int? editId) { await Load(); AddBlankBatchRows(); if (editId is int id && Employees.FirstOrDefault(x => x.Id == id) is Employee e) { Input = FromEmployee(e); if (e.CurrentWorkshop is Workshop current && WorkshopOptions.All(x => x.Value != current.Id.ToString())) WorkshopOptions.Add(new SelectListItem(current.Name, current.Id.ToString())); } }
+    public async Task OnGetAsync(int? editId) { await Load(); AddBlankBatchRows(); if (editId is int id && Employees.FirstOrDefault(x => x.Id == id) is Employee e) { if (IsLocked(e)) { Error = SeniorDenied; return; } Input = FromEmployee(e); if (e.CurrentWorkshop is Workshop current && WorkshopOptions.All(x => x.Value != current.Id.ToString())) WorkshopOptions.Add(new SelectListItem(current.Name, current.Id.ToString())); } }
     public async Task<IActionResult> OnPostAsync()
     {
         if (string.IsNullOrWhiteSpace(Input.EmployeeId) || string.IsNullOrWhiteSpace(Input.FullName) || Input.WorkshopId == 0) return await ShowError("Emp ID, Name and Workshop are required.");
@@ -67,6 +70,7 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         if (Input.IsNewEmployee == true && Input.StartDate is null) return await ShowError("Start Date is required for a New Employee. Enter the day they actually started.");
         if (Input.StartDate is DateOnly start && !StartDateInRange(start)) return await ShowError(StartDateRangeMessage);
         var employee = Input.Id is int id ? await db.Employees.FindAsync(id) : null;
+        if (!CanEditSenior && (JobGrades.RequiresApprover(Input.JobGrade) || (employee is not null && JobGrades.RequiresApprover(employee.JobGrade)))) return await ShowError(SeniorDenied);
         if (await db.Employees.AnyAsync(x => x.EmployeeId == Input.EmployeeId && x.Id != Input.Id)) return await ShowError($"Emp ID '{Input.EmployeeId}' already exists.");
         if (employee is null ? Input.IsNewEmployee == true : employee.IsNewEmployee != Input.IsNewEmployee)
         {
@@ -103,6 +107,7 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         if (unknownGroup is not null) return await ShowError($"Special group '{unknownGroup}' was not found. Add it on the Special Groups page first.");
         var idSet = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
         var existing = (await db.Employees.Where(x => idSet.Contains(x.EmployeeId)).ToListAsync()).ToDictionary(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase); var added = 0;
+        if (!CanEditSenior && rows.FirstOrDefault(r => JobGrades.RequiresApprover(r.JobGrade) || (existing.TryGetValue(r.EmployeeId.Trim(), out var current) && JobGrades.RequiresApprover(current.JobGrade))) is { } seniorRow) return await ShowError($"Emp ID '{seniorRow.EmployeeId.Trim()}': {SeniorDenied}");
         if (BatchIsNew == "yes" && rows.Any(r => !existing.ContainsKey(r.EmployeeId.Trim())))
         {
             await LoadTagScopeAsync();
@@ -117,7 +122,8 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
     {
         var rowIds = GridRows.Select(r => r.Id).ToHashSet();
         var employees = (await db.Employees.ToListAsync()).Where(x => rowIds.Contains(x.Id)).ToDictionary(x => x.Id);
-        var workshopIds = (await db.Workshops.ToListAsync()).Select(x => x.Id).ToHashSet();
+        var workshopNames = (await db.Workshops.ToListAsync()).ToDictionary(x => x.Id, x => x.Name);
+        var workshopIds = workshopNames.Keys.ToHashSet();
         var employeeIdOwners = employees.Values.ToDictionary(x => x.EmployeeId, x => x.Id, StringComparer.OrdinalIgnoreCase);
         var allGroups = await db.SpecialGroups.ToListAsync();
         var rowGroupNames = GridRows.Select(row => row.Groups ?? []).ToList();
@@ -127,9 +133,18 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         {
             var row = GridRows[i];
             if (!employees.TryGetValue(row.Id, out var employee)) continue;
+            // Locked rows have no edit inputs in the page, so they arrive blank and are left untouched.
+            if (IsLocked(employee)) continue;
+            if (!CanEditSenior && JobGrades.RequiresApprover(row.JobGrade)) return await ShowError($"Emp ID '{row.EmployeeId}': {SeniorDenied}");
             if (string.IsNullOrWhiteSpace(row.EmployeeId) || string.IsNullOrWhiteSpace(row.FullName)) return await ShowError("Emp ID and Name are required for every row.");
             if (!workshopIds.Contains(row.WorkshopId)) return await ShowError("Select a valid Workshop for every row.");
             if (row.Shift is not ("A" or "B" or "C" or "Day")) return await ShowError("Select a valid Shift for every row.");
+            // Total groups and the other Day workshops are for the Day shift only; Day may also use the 9 lines, A/B/C only the lines. A row may keep its saved workshop and shift unchanged.
+            var chosenName = workshopNames[row.WorkshopId];
+            var isDayWorkshop = SeedData.DayWorkshops.Any(d => d.Name.Equals(chosenName, StringComparison.OrdinalIgnoreCase));
+            var isLine = SeedData.EmployeeWorkshopNames.Any(n => n.Equals(chosenName, StringComparison.OrdinalIgnoreCase));
+            var isUnchanged = employee.CurrentWorkshopId == row.WorkshopId && employee.Shift == row.Shift;
+            if (row.Shift == "Day" ? !isDayWorkshop && !isLine && employee.CurrentWorkshopId != row.WorkshopId : isDayWorkshop && !isUnchanged) return await ShowError($"Emp ID '{row.EmployeeId}': {(row.Shift == "Day" ? "Select a Total group or one of the lines for the Day shift" : "Total groups and Day workshops are for the Day shift only")}.");
             if (employeeIdOwners.TryGetValue(row.EmployeeId, out var ownerId) && ownerId != row.Id) return await ShowError($"Emp ID '{row.EmployeeId}' already exists.");
             if (!TryParseStartDate(row.StartDate, out var gridStart)) return await ShowError($"Start Date '{row.StartDate}' for Emp ID '{row.EmployeeId}' is not a date. Use yyyy-MM-dd.");
             if (gridStart is DateOnly gs && !StartDateInRange(gs)) return await ShowError($"Emp ID '{row.EmployeeId}': {StartDateRangeMessage}");
@@ -156,9 +171,11 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         if (!CanDelete) return Forbid();
         var employee = await db.Employees.FindAsync(id);
         if (employee is null) return RedirectToPage();
+        // Delete is unconditional: resignation tickets are the only records that block it (Restrict FK), so they go with the employee.
+        // Everything else (history, attendance, notes, groups, new hire data) is removed by cascade.
+        db.ResignationTickets.RemoveRange(await db.ResignationTickets.Where(t => t.EmployeeId == id).ToListAsync());
         db.Employees.Remove(employee);
-        try { await db.SaveChangesAsync(); Message = "Employee deleted."; }
-        catch (DbUpdateException) { return await ShowError("Cannot delete this employee because related records (e.g. resignation tickets) still reference them."); }
+        await db.SaveChangesAsync(); Message = "Employee deleted.";
         return RedirectToPage();
     }
     public async Task<IActionResult> OnPostBulkDeleteAsync(List<int> selectedIds)
@@ -167,27 +184,10 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         if (selectedIds is null || selectedIds.Count == 0) return await ShowError("Select at least one employee to delete.");
         var idSet = selectedIds.ToHashSet();
         var employees = await db.Employees.Where(x => idSet.Contains(x.Id)).ToListAsync();
+        db.ResignationTickets.RemoveRange(await db.ResignationTickets.Where(t => idSet.Contains(t.EmployeeId)).ToListAsync());
         db.Employees.RemoveRange(employees);
-        try { await db.SaveChangesAsync(); Message = $"Deleted {employees.Count} employee(s)."; }
-        catch (DbUpdateException) { return await ShowError("Cannot delete one or more selected employees because related records (e.g. resignation tickets) still reference them."); }
+        await db.SaveChangesAsync(); Message = $"Deleted {employees.Count} employee(s).";
         return RedirectToPage();
-    }
-    public async Task<IActionResult> OnGetExportCsvAsync()
-    {
-        var employees = await db.Employees.Include(x => x.CurrentWorkshop).Include(x => x.SpecialGroups).ThenInclude(x => x.SpecialGroup).OrderBy(x => x.EmployeeId).ToListAsync();
-        var sb = new StringBuilder();
-        sb.AppendLine(string.Join(',', new[] { "Emp ID", "Name", "Job Grade", "Process", "Workshop", "Shift", "Accommodation", "Tel. No", "Status", "Start Date", "New Employee", "Special Groups", "Remark" }.Select(CsvField)));
-        foreach (var e in employees)
-        {
-            var groups = string.Join("; ", e.SpecialGroups.Select(x => x.SpecialGroup!.Name));
-            sb.AppendLine(string.Join(',', new[] { e.EmployeeId, e.FullName, e.JobGrade, e.Process, e.CurrentWorkshop?.Name ?? "", e.Shift, e.Accommodation, e.TelephoneNumber, e.EmploymentState.ToString(), e.StartDate.ToString("yyyy-MM-dd"), e.IsNewEmployee ? "Yes" : "No", groups, e.Remark }.Select(CsvField)));
-        }
-        return File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray(), "text/csv", $"employees_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
-    }
-    private static string CsvField(string? value)
-    {
-        value ??= "";
-        return value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r') ? $"\"{value.Replace("\"", "\"\"")}\"" : value;
     }
     private async Task<IActionResult> ShowError(string error) { Error = error; await Load(); AddBlankBatchRows(); return Page(); }
     private void AddBlankBatchRows() { while (BatchRows.Count < 20) BatchRows.Add(new BatchEmployeeInput()); }
@@ -224,5 +224,26 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         var existingIds = employee.SpecialGroups.Select(x => x.SpecialGroupId).ToHashSet();
         foreach (var id in wantedIds.Where(id => !existingIds.Contains(id))) employee.SpecialGroups.Add(new EmployeeSpecialGroup { Employee = employee, SpecialGroupId = id });
     }
-    private async Task Load() { await LoadTagScopeAsync(); Employees = await db.Employees.Include(x => x.CurrentWorkshop).Include(x => x.SpecialGroups).ThenInclude(x => x.SpecialGroup).OrderBy(x => x.EmployeeId).ToListAsync(); var workshops = await db.Workshops.ToListAsync(); WorkshopOptions = SeedData.EmployeeWorkshopNames.Select(name => workshops.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))).Where(x => x is not null).Select(x => new SelectListItem(x!.Name, x.Id.ToString())).ToList(); if (Input.Id is not null && Employees.FirstOrDefault(x => x.Id == Input.Id)?.CurrentWorkshop is Workshop current && WorkshopOptions.All(x => x.Value != current.Id.ToString())) WorkshopOptions.Add(new SelectListItem(current.Name, current.Id.ToString())); DayWorkshopOptions = SeedData.DayWorkshops.Select(d => (d.Label, w: workshops.FirstOrDefault(x => x.Name.Equals(d.Name, StringComparison.OrdinalIgnoreCase)))).Where(x => x.w is not null).Select(x => new SelectListItem(x.Label, x.w!.Id.ToString())).ToList(); GroupOptions = await db.SpecialGroups.Where(x => x.IsActive).OrderBy(x => x.Name).Select(x => new SelectListItem(x.Name, x.Id.ToString())).ToListAsync(); }
+    // Every workshop in hierarchy order (Total groups first, then their children), the same tree the Dashboard filter uses.
+    public record WorkshopNode(int Id, string Name, int Depth);
+    public List<WorkshopNode> WorkshopTree { get; private set; } = [];
+    // Workshop id -> "Total Production|Total Chemical Line|Pellet Line", so a Total group filter also matches its descendants.
+    public Dictionary<int, string> WorkshopPaths { get; private set; } = [];
+    private void BuildWorkshopTree(List<Workshop> workshops)
+    {
+        var ids = workshops.Select(x => x.Id).ToHashSet();
+        var children = workshops.ToLookup(x => x.ParentId is int p && ids.Contains(p) ? p : (int?)null);
+        var tree = new List<WorkshopNode>();
+        var paths = new Dictionary<int, string>();
+        void Walk(Workshop w, int depth, string path)
+        {
+            if (!paths.TryAdd(w.Id, path)) return;
+            tree.Add(new WorkshopNode(w.Id, w.Name, depth));
+            foreach (var child in children[w.Id].OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)) Walk(child, depth + 1, path + "|" + child.Name);
+        }
+        foreach (var root in children[null].OrderByDescending(x => children[x.Id].Any()).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)) Walk(root, 0, root.Name);
+        WorkshopTree = tree;
+        WorkshopPaths = paths;
+    }
+    private async Task Load() { await LoadTagScopeAsync(); Employees = await db.Employees.Include(x => x.CurrentWorkshop).Include(x => x.SpecialGroups).ThenInclude(x => x.SpecialGroup).OrderBy(x => x.EmployeeId).ToListAsync(); var workshops = await db.Workshops.ToListAsync(); WorkshopOptions = SeedData.EmployeeWorkshopNames.Select(name => workshops.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))).Where(x => x is not null).Select(x => new SelectListItem(x!.Name, x.Id.ToString())).ToList(); if (Input.Id is not null && Employees.FirstOrDefault(x => x.Id == Input.Id)?.CurrentWorkshop is Workshop current && WorkshopOptions.All(x => x.Value != current.Id.ToString())) WorkshopOptions.Add(new SelectListItem(current.Name, current.Id.ToString())); BuildWorkshopTree(workshops); DayWorkshopOptions = SeedData.DayWorkshops.Select(d => (d.Label, w: workshops.FirstOrDefault(x => x.Name.Equals(d.Name, StringComparison.OrdinalIgnoreCase)))).Where(x => x.w is not null).Select(x => new SelectListItem(x.Label, x.w!.Id.ToString())).ToList(); GroupOptions = await db.SpecialGroups.Where(x => x.IsActive).OrderBy(x => x.Name).Select(x => new SelectListItem(x.Name, x.Id.ToString())).ToListAsync(); }
 }

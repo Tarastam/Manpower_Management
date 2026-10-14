@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbCo
     public DbSet<NewHireOutput> NewHireOutputs => Set<NewHireOutput>();
     public DbSet<NewHireNote> NewHireNotes => Set<NewHireNote>();
     public DbSet<NewHireRiskSetting> NewHireRiskSettings => Set<NewHireRiskSetting>();
+    public DbSet<AttendanceNote> AttendanceNotes => Set<AttendanceNote>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -91,6 +92,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbCo
         builder.Entity<NewHireNote>().Property(x => x.CreatedBy).HasMaxLength(100);
         builder.Entity<NewHireNote>().HasIndex(x => new { x.EmployeeId, x.Kind, x.BusinessDate }).IsUnique();
         builder.Entity<NewHireNote>().HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Cascade);
+        builder.Entity<AttendanceNote>().Property(x => x.Text).HasMaxLength(AttendanceNote.MaxLength);
+        builder.Entity<AttendanceNote>().Property(x => x.UpdatedBy).HasMaxLength(100);
+        builder.Entity<AttendanceNote>().HasIndex(x => new { x.EmployeeId, x.BusinessDate }).IsUnique();
+        builder.Entity<AttendanceNote>().HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Cascade);
         builder.Entity<NewHireRiskSetting>().Property(x => x.Id).ValueGeneratedNever();
         builder.Entity<NewHireRiskSetting>().Property(x => x.LeaveRatePercent).HasPrecision(5, 2);
     }

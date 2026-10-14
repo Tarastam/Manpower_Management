@@ -19,8 +19,8 @@
     const rows = data.rows.map(row => ({
         ...row,
         cells: row.cells.map(c => {
-            const cell = { h: Number(c.h), lt: c.lt, lh: Number(c.lh), w: c.w || homeWorkshop, rs: !!c.rs, err: null, raw: '' };
-            cell.orig = { h: cell.h, lt: cell.lt, lh: cell.lh, w: cell.w };
+            const cell = { h: Number(c.h), lt: c.lt, lh: Number(c.lh), w: c.w || homeWorkshop, rs: !!c.rs, err: null, raw: '', n: c.n || '', noteErr: null };
+            cell.orig = { h: cell.h, lt: cell.lt, lh: cell.lh, w: cell.w, n: cell.n };
             return cell;
         })
     }));
@@ -65,6 +65,8 @@
         return cell.h.toFixed(2);
     }
 
+    // A remark is saved on its own: changing it never touches the cell's hours or leave.
+    const noteDirty = cell => cell.n !== cell.orig.n && !cell.noteErr;
     const isDirty = cell => cell.err || cell.h !== cell.orig.h || cell.lt !== cell.orig.lt || cell.lh !== cell.orig.lh || cell.w !== cell.orig.w;
 
     // ---------- render ----------
@@ -127,17 +129,19 @@
     function esc(s) { return String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]); }
 
     function paintCell(r, j) {
-        const cell = rows[r].cells[j], el = cellEls[r][j], dirty = isDirty(cell);
+        const cell = rows[r].cells[j], el = cellEls[r][j], dirty = isDirty(cell) || noteDirty(cell);
         el.textContent = display(cell, j);
         el.className = ['ag-c', dayClasses(j),
             cell.lt && `lt-${cell.lt}`,
             !cell.err && !cell.lt && !days[j].off && cell.h !== STD && 'custom',
             days[j].off && cell.h > 0 && 'ot',
             cell.w !== homeWorkshop && 'transfer',
+            cell.n && 'has-note',
             cell.err && 'err',
             isLocked(j) && 'locked',
             cell.rs ? 'resigned' : dirty ? 'dirty' : 'ok'].filter(Boolean).join(' ');
-        el.title = cell.rs ? 'Resigned: past this employee\'s last working day' : cell.err || (cell.w !== homeWorkshop ? `Worked in ${data.workshops[cell.w] || 'another workshop'}` : '');
+        const base = cell.rs ? 'Resigned: past this employee\'s last working day' : cell.err || (cell.w !== homeWorkshop ? `Worked in ${data.workshops[cell.w] || 'another workshop'}` : '');
+        el.title = [base, cell.n && `Note: ${cell.n}`].filter(Boolean).join('\n');
         if (selected.has(el)) el.classList.add('sel');
         if (active.r === r && active.j === j) el.classList.add('active');
     }
@@ -178,7 +182,7 @@
     let saveTimer = null, saving = false, leaving = false;
     const manpowerDirty = m => (m.ind ? m.ind.join() : '') !== m.orig;
     const anyErrors = () => rows.some(row => row.cells.some(c => c.err));
-    function anyDirty() { return rows.some(row => row.cells.some(isDirty)) || manpower.some(manpowerDirty); }
+    function anyDirty() { return rows.some(row => row.cells.some(c => isDirty(c) || noteDirty(c))) || manpower.some(manpowerDirty); }
     function setSaveState(text, kind) { saveState.hidden = !text; saveState.textContent = text || ''; saveState.style.color = kind === 'error' ? '#c0392b' : kind === 'saved' ? '#1c7a4b' : ''; }
     function refreshDirty() { if (anyDirty()) { setSaveState('● Saving…'); clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 600); } }
     function stageUrl() {
@@ -190,14 +194,16 @@
     async function saveNow() {
         saveTimer = null;
         if (saving) { saveTimer = setTimeout(saveNow, 300); return; }
-        const sentCells = [], sentManpower = [];
+        const sentCells = [], sentManpower = [], sentNotes = [];
         rows.forEach((row, r) => row.cells.forEach((c, j) => { if (!c.err && !c.rs && isDirty(c)) sentCells.push({ r, j, h: c.h, lt: c.lt, lh: c.lh, w: c.w }); }));
+        rows.forEach((row, r) => row.cells.forEach((c, j) => { if (noteDirty(c)) sentNotes.push({ r, j, n: c.n }); }));
         manpower.forEach((m, j) => { if (m.ind && manpowerDirty(m)) sentManpower.push({ j, ind: [...m.ind] }); });
-        if (!sentCells.length && !sentManpower.length) { if (anyErrors()) setSaveState('⚠ Fix the red cells to save them', 'error'); else setSaveState('✓ Saved', 'saved'); return; }
+        if (!sentCells.length && !sentManpower.length && !sentNotes.length) { if (anyErrors()) setSaveState('⚠ Fix the red cells to save them', 'error'); else setSaveState('✓ Saved', 'saved'); return; }
         saving = true;
         const body = {
             cells: sentCells.map(c => ({ employeeId: rows[c.r].id, date: days[c.j].date, hours: c.h, leaveType: c.lt, leaveHours: c.lh, workshopId: c.w })),
-            manpower: sentManpower.map(m => ({ date: days[m.j].date, i1067: m.ind[0], i841: m.ind[1], i733: m.ind[2] }))
+            manpower: sentManpower.map(m => ({ date: days[m.j].date, i1067: m.ind[0], i841: m.ind[1], i733: m.ind[2] })),
+            notes: sentNotes.map(n => ({ employeeId: rows[n.r].id, date: days[n.j].date, text: n.n }))
         };
         try {
             const response = await fetch(stageUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token || '' }, body: JSON.stringify(body), credentials: 'same-origin' });
@@ -213,6 +219,11 @@
                 else cell.orig = { h: c.h, lt: c.lt, lh: c.lh, w: c.w };
                 paintCell(c.r, c.j); touched.add(c.r);
             });
+            sentNotes.forEach(n => {
+                const cell = rows[n.r].cells[n.j], message = failed.get(`${rows[n.r].id}|${days[n.j].date}`);
+                if (message) cell.noteErr = message; else cell.orig.n = n.n;
+                paintCell(n.r, n.j);
+            });
             sentManpower.forEach(m => { if (!failed.has(`0|${days[m.j].date}`)) manpower[m.j].orig = m.ind.join(); });
             touched.forEach(updateWeeks); showStatus();
             const failures = result.failures || [];
@@ -224,10 +235,10 @@
         } finally {
             saving = false;
             // Edits made while the request was in flight still need saving.
-            if (!saveTimer && (rows.some(row => row.cells.some(c => !c.err && isDirty(c))) || manpower.some(manpowerDirty))) saveTimer = setTimeout(saveNow, 600);
+            if (!saveTimer && (rows.some(row => row.cells.some(c => (!c.err && isDirty(c)) || noteDirty(c))) || manpower.some(manpowerDirty))) saveTimer = setTimeout(saveNow, 600);
         }
     }
-    window.addEventListener('beforeunload', e => { if (!leaving && (saving || rows.some(row => row.cells.some(c => isDirty(c) && !c.err)) || manpower.some(manpowerDirty))) { e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('beforeunload', e => { if (!leaving && (saving || rows.some(row => row.cells.some(c => (isDirty(c) && !c.err) || noteDirty(c))) || manpower.some(manpowerDirty))) { e.preventDefault(); e.returnValue = ''; } });
     document.querySelector('[data-nav-select]')?.form.addEventListener('submit', e => { if (anyDirty() && !confirm('Some changes have not finished saving. Switch shift anyway?')) { e.preventDefault(); location.reload(); } else leaving = true; });
     document.querySelectorAll('[data-nav]').forEach(a => a.addEventListener('click', e => { if (anyDirty() && !confirm('Some changes have not finished saving. Leave this month anyway?')) e.preventDefault(); else leaving = true; }));
 
@@ -258,7 +269,7 @@
         const row = rows[active.r]; if (!row) return;
         const cell = row.cells[active.j], d = days[active.j], n = selectedCells().length;
         const what = cell.rs ? 'Resigned (past last working day)' : cell.err ? `⚠ ${cell.err}` : cell.lt ? `${leaveName(cell.lt)} ${cell.lh.toFixed(2)} hrs${cell.h ? ` · worked ${cell.h.toFixed(2)} hrs` : ''}` : d.off && cell.h === 0 ? 'OFF day' : `${cell.h.toFixed(2)} hrs${d.off ? ' OT' : ''}`;
-        status.textContent = `${row.name} · ${d.dow} ${d.date} · ${what}${cell.w !== homeWorkshop ? ` · transfer to ${data.workshops[cell.w] || '?'}` : ''}${isLocked(active.j) ? ' · locked (previous date, Admin only)' : ''}${n > 1 ? ` · ${n} cells selected` : ''}`;
+        status.textContent = `${row.name} · ${d.dow} ${d.date} · ${what}${cell.w !== homeWorkshop ? ` · transfer to ${data.workshops[cell.w] || '?'}` : ''}${isLocked(active.j) ? ' · locked (previous date, Admin only)' : ''}${cell.n ? ` · Note: ${cell.n}` : ''}${n > 1 ? ` · ${n} cells selected` : ''}`;
         status.className = 'ag-status' + (cell.err ? ' error' : '');
     }
     const leaveNames = { AL: 'Annual leave', SL: 'Sick leave', BL: 'Business leave', OL: 'Other leave', AB: 'Absent', ML: 'Mother leave' };
@@ -344,6 +355,7 @@
         if (arrows[e.key]) { e.preventDefault(); move(...arrows[e.key], e.shiftKey); }
         else if (e.key === 'Tab') { e.preventDefault(); move(0, e.shiftKey ? -1 : 1); }
         else if (e.key === 'Enter') { e.preventDefault(); move(e.shiftKey ? -1 : 1, 0); }
+        else if (e.key === 'F2' && e.shiftKey) { e.preventDefault(); openNote(); }
         else if (e.key === 'F2') { e.preventDefault(); startEdit('', false); }
         else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); applyToCells(selectedCells(), ''); }
         else if (e.key === 'Escape') { anchor = { ...active }; paintSelection(); }
@@ -428,6 +440,30 @@
         bootstrap.Modal.getOrCreateInstance(transferModal).hide();
     });
     transferModal?.addEventListener('hidden.bs.modal', () => wrap.focus({ preventScroll: true }));
+
+    // ---------- remark (like an Excel cell note) ----------
+    const noteModal = byId('agNoteModal'), noteText = byId('agNoteText'), noteCount = byId('agNoteCount'), NOTE_MAX = Number(noteText?.maxLength || 500);
+    function openNote() {
+        const row = rows[active.r], d = days[active.j]; if (!row || !noteModal) return;
+        byId('agNoteContext').textContent = `${row.name} · ${d.dow} ${d.date}`;
+        noteText.value = row.cells[active.j].n;
+        noteCount.textContent = `${noteText.value.length}/${NOTE_MAX}`;
+        byId('agNoteDelete').hidden = !row.cells[active.j].n;
+        bootstrap.Modal.getOrCreateInstance(noteModal).show();
+    }
+    function applyNote(text) {
+        const cell = rows[active.r].cells[active.j];
+        cell.n = text.trim().slice(0, NOTE_MAX); cell.noteErr = null;
+        paintCell(active.r, active.j); refreshDirty(); showStatus();
+        bootstrap.Modal.getOrCreateInstance(noteModal).hide();
+    }
+    byId('agNote')?.addEventListener('click', openNote);
+    noteText?.addEventListener('input', () => { noteCount.textContent = `${noteText.value.length}/${NOTE_MAX}`; });
+    noteText?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); applyNote(noteText.value); } });
+    byId('agNoteSave')?.addEventListener('click', () => applyNote(noteText.value));
+    byId('agNoteDelete')?.addEventListener('click', () => applyNote(''));
+    noteModal?.addEventListener('shown.bs.modal', () => { noteText.focus(); noteText.setSelectionRange(noteText.value.length, noteText.value.length); });
+    noteModal?.addEventListener('hidden.bs.modal', () => wrap.focus({ preventScroll: true }));
 
     // ---------- Direct / Indirect ----------
     const indirectModal = byId('agIndirectModal'), indInputs = [...document.querySelectorAll('.ag-ind')];

@@ -12,6 +12,12 @@
         <p class="wd-period-note">วันที่คำนวณล่าสุด: @(Model.LastCalculatedAt is DateTime t ? WorkingHoursModel.ThaiDateTime(t) : "—")</p>
     </div>
 
+    <section class="wd-card wh-flush">
+        <p>ข้อมูล Attendance ที่ยังค้างใน staging: <strong>@Model.PendingCount.ToString("N0")</strong> รายการ (ระบบส่งเข้า SQL อัตโนมัติ 07:00 และ 19:00)</p>
+        <form method="post" asp-page-handler="Flush"><button class="wd-apply" type="submit" onclick="return confirm('ส่งข้อมูลที่ค้างใน staging เข้า SQL ตอนนี้เลยหรือไม่?')">Flush now</button></form>
+        @if (!string.IsNullOrEmpty(Model.FlushMessage)) { <p class="wh-flush-msg" role="status">@Model.FlushMessage</p> }
+    </section>
+
     <form class="wh-filters" method="get">
         <div class="wd-filter-field"><label for="whFrom">ช่วงวันที่ (จาก)</label><input id="whFrom" type="date" name="from" value="@Model.From?.ToString("yyyy-MM-dd")" /></div>
         <div class="wd-filter-field"><label for="whTo">ช่วงวันที่ (ถึง)</label><input id="whTo" type="date" name="to" value="@Model.To?.ToString("yyyy-MM-dd")" /></div>

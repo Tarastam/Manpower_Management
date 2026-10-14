@@ -183,6 +183,41 @@ namespace ManpowerManagement.Migrations
                     b.ToTable("AttendanceLeaders", "mp");
                 });
 
+            modelBuilder.Entity("ManpowerManagement.Models.AttendanceNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateOnly>("BusinessDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId", "BusinessDate")
+                        .IsUnique();
+
+                    b.ToTable("AttendanceNotes", "mp");
+                });
+
             modelBuilder.Entity("ManpowerManagement.Models.AuditLog", b =>
                 {
                     b.Property<int>("Id")
@@ -828,6 +863,17 @@ namespace ManpowerManagement.Migrations
                         .IsRequired();
 
                     b.Navigation("Workshop");
+                });
+
+            modelBuilder.Entity("ManpowerManagement.Models.AttendanceNote", b =>
+                {
+                    b.HasOne("ManpowerManagement.Models.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
                 });
 
             modelBuilder.Entity("ManpowerManagement.Models.Employee", b =>

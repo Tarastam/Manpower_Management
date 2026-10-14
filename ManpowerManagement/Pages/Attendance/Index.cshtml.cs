@@ -33,7 +33,7 @@ public class IndexModel(AppDbContext db, IMemoryCache cache, LeaderSessionServic
         [LeaveType.Absent] = "AB",
         [LeaveType.MotherLeave] = "ML"
     };
-    public class AttendanceCell { public DateOnly BusinessDate { get; set; } public decimal WorkingHours { get; set; } = StandardHours; public int WorkshopId { get; set; } public LeaveType LeaveType { get; set; } = LeaveType.None; public decimal LeaveHours { get; set; } public bool IsOffDay { get; set; } public bool IsConfirmed { get; set; } public bool IsResigned { get; set; } }
+    public class AttendanceCell { public DateOnly BusinessDate { get; set; } public decimal WorkingHours { get; set; } = StandardHours; public int WorkshopId { get; set; } public LeaveType LeaveType { get; set; } = LeaveType.None; public decimal LeaveHours { get; set; } public bool IsOffDay { get; set; } public bool IsConfirmed { get; set; } public bool IsResigned { get; set; } public string Note { get; set; } = ""; }
     public class GridRow { public int EmployeeId { get; set; } public string EmployeeCode { get; set; } = ""; public string EmployeeName { get; set; } = ""; public string EmployeeShift { get; set; } = ""; public string Process { get; set; } = ""; public bool IsLeader { get; set; } public List<AttendanceCell> Cells { get; set; } = []; }
     public record WeekGroup(DateOnly Start, DateOnly End, int StartIndex, int Count);
     // Keyed is false for a day whose summary row was created automatically and nobody entered the indirect headcount yet.
@@ -45,7 +45,9 @@ public class IndexModel(AppDbContext db, IMemoryCache cache, LeaderSessionServic
     // The browser sends only the cells and headcounts that changed; they are kept in the staging file until 07:00 / 19:00.
     public record StageCellIn(int EmployeeId, DateOnly Date, decimal Hours, int LeaveType, decimal LeaveHours, int WorkshopId);
     public record StageManpowerIn(DateOnly Date, int I1067, int I841, int I733);
-    public record StageRequest(List<StageCellIn>? Cells, List<StageManpowerIn>? Manpower);
+    // An empty text clears the remark.
+    public record StageNoteIn(int EmployeeId, DateOnly Date, string? Text);
+    public record StageRequest(List<StageCellIn>? Cells, List<StageManpowerIn>? Manpower, List<StageNoteIn>? Notes = null);
     public record StageFailure(int EmployeeId, DateOnly Date, string Message);
 
     // Admin only: a checked-in leader's workshop and shift always come from the leader session.
@@ -93,9 +95,10 @@ public class IndexModel(AppDbContext db, IMemoryCache cache, LeaderSessionServic
         if (!HasScope) { Error = "Select a workshop and shift."; return Page(); }
         await LoadGridAsync();
         var sb = new StringBuilder();
-        sb.AppendLine(string.Join(',', new[] { "Emp ID", "Employee", "Process", "Shift" }.Concat(Days.Select(d => d.ToString("yyyy-MM-dd"))).Select(CsvField)));
+        sb.AppendLine(string.Join(',', new[] { "Emp ID", "Employee", "Process", "Shift" }.Concat(Days.Select(d => d.ToString("yyyy-MM-dd"))).Append("Remarks").Select(CsvField)));
         foreach (var row in GridRows)
-            sb.AppendLine(string.Join(',', new[] { row.EmployeeCode, row.EmployeeName, row.Process, row.EmployeeShift }.Concat(row.Cells.Select(c => c.IsResigned ? "Resigned" : CellCode(c))).Select(CsvField)));
+            sb.AppendLine(string.Join(',', new[] { row.EmployeeCode, row.EmployeeName, row.Process, row.EmployeeShift }.Concat(row.Cells.Select(c => c.IsResigned ? "Resigned" : CellCode(c)))
+                .Append(string.Join("; ", row.Cells.Where(c => c.Note != "").Select(c => $"{c.BusinessDate:dd/MM}: {c.Note}"))).Select(CsvField)));
         sb.AppendLine(string.Join(',', new[] { "", "Direct MP", "", "" }.Concat(Days.Select(d => Manpower.TryGetValue(d, out var m) ? m.DirectCount?.ToString() ?? "" : "")).Select(CsvField)));
         sb.AppendLine(string.Join(',', new[] { "", "Indirect MP", "", "" }.Concat(Days.Select(d => Manpower.TryGetValue(d, out var m) ? m.IndirectCount?.ToString() ?? "" : "")).Select(CsvField)));
         var fileName = $"attendance_{WorkshopName}_{Shift}_{MonthStart:yyyy-MM}.csv";
@@ -212,9 +215,27 @@ public class IndexModel(AppDbContext db, IMemoryCache cache, LeaderSessionServic
             manpower.Add(new StagedManpower { WorkshopId = workshopId, Shift = Shift, Date = m.Date, I1067 = m.I1067, I841 = m.I841, I733 = m.I733, Actor = Actor });
         }
 
+        // Remarks are kept apart from the hours, so a remark alone never creates an attendance entry.
+        var remarks = new List<StagedNote>();
+        var noteIds = (request.Notes ?? []).Select(n => n.EmployeeId).Where(roster.ContainsKey).Distinct().ToList();
+        var storedNotes = noteIds.Count == 0 ? new Dictionary<(int, DateOnly), string>() : (await db.AttendanceNotes
+            .Where(n => n.BusinessDate >= first && n.BusinessDate <= last && noteIds.Contains(n.EmployeeId)).ToListAsync())
+            .ToDictionary(n => (n.EmployeeId, n.BusinessDate), n => n.Text);
+        var pendingNotes = staging.PendingNotes(n => n.Date >= first && n.Date <= last && noteIds.Contains(n.EmployeeId)).ToDictionary(n => (n.EmployeeId, n.Date), n => n.Text);
+        foreach (var note in (request.Notes ?? []).GroupBy(n => (n.EmployeeId, n.Date)).Select(g => g.Last()))
+        {
+            if (!roster.ContainsKey(note.EmployeeId) || !daySet.Contains(note.Date)) continue;
+            var text = (note.Text ?? "").Trim();
+            if (text.Length > AttendanceNote.MaxLength) { failures.Add(new StageFailure(note.EmployeeId, note.Date, $"A remark can be at most {AttendanceNote.MaxLength} characters.")); continue; }
+            var current = pendingNotes.TryGetValue((note.EmployeeId, note.Date), out var p) ? p : storedNotes.GetValueOrDefault((note.EmployeeId, note.Date)) ?? "";
+            if (current == text) continue;
+            remarks.Add(new StagedNote { EmployeeId = note.EmployeeId, Date = note.Date, Text = text, Actor = Actor });
+        }
+
         if (changes.Count > 0) staging.StageCells(changes);
         if (manpower.Count > 0) staging.StageManpower(manpower);
-        return new JsonResult(new { ok = true, saved = changes.Count + manpower.Count, failures });
+        if (remarks.Count > 0) staging.StageNotes(remarks);
+        return new JsonResult(new { ok = true, saved = changes.Count + manpower.Count + remarks.Count, failures });
     }
     public async Task<IActionResult> OnPostIndirectHoursAsync(DateOnly businessDate, decimal indirectHours)
     {
@@ -277,6 +298,14 @@ public class IndexModel(AppDbContext db, IMemoryCache cache, LeaderSessionServic
             var workshopId = WorkshopId.Value;
             AllowedShifts = await db.Employees.Where(e => e.EmploymentState == EmploymentState.Active && e.CurrentWorkshopId == workshopId).Select(e => e.Shift).Distinct().OrderBy(s => s).ToListAsync();
             if (AllowedShifts.Count == 0) AllowedShifts.Add(LeaderSessionService.DayShift);
+            // A leader who is not on the Day shift cannot key the Day shift; leaders outside the employee master keep every shift.
+            if (Leader.EmployeeKey != 0)
+            {
+                var ownShift = await db.Employees.Where(e => e.Id == Leader.EmployeeKey).Select(e => e.Shift).FirstOrDefaultAsync();
+                var isDayLeader = string.Equals(ownShift, LeaderSessionService.DayShift, StringComparison.OrdinalIgnoreCase);
+                var withoutDay = AllowedShifts.Where(s => !s.Equals(LeaderSessionService.DayShift, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (!isDayLeader && withoutDay.Count > 0) AllowedShifts = withoutDay;
+            }
             Shift = AllowedShifts.FirstOrDefault(s => s.Equals(Shift, StringComparison.OrdinalIgnoreCase)) ?? AllowedShifts[0];
             return true;
         }
@@ -328,6 +357,14 @@ public class IndexModel(AppDbContext db, IMemoryCache cache, LeaderSessionServic
                 return standard;
             }).ToList()
         }).ToList();
+
+        // Remarks: stored ones, covered by any change still waiting in the staging file (an empty text clears it).
+        var remarks = (await db.AttendanceNotes.AsNoTracking().Where(n => n.BusinessDate >= first && n.BusinessDate <= last && employeeIds.Contains(n.EmployeeId)).ToListAsync())
+            .ToDictionary(n => (n.EmployeeId, n.BusinessDate), n => n.Text);
+        foreach (var n in staging.PendingNotes(x => x.Date >= first && x.Date <= last && employeeIds.Contains(x.EmployeeId))) remarks[(n.EmployeeId, n.Date)] = n.Text;
+        foreach (var row in GridRows)
+            foreach (var cell in row.Cells)
+                if (remarks.TryGetValue((row.EmployeeId, cell.BusinessDate), out var text)) cell.Note = text;
     }
 
     // Shows whole Sunday–Saturday weeks around the month, like the Excel sheets, so weekly totals are complete.

@@ -190,6 +190,66 @@ public class HourCountingTests : IDisposable
     }
 
     [Fact]
+    public async Task Flush_writes_a_staged_remark_to_sql_and_an_empty_one_deletes_it()
+    {
+        var employee = AddEmployee("E1");
+        store.StageNotes([new StagedNote { EmployeeId = employee.Id, Date = Day, Text = "Booked annual leave", Actor = "leader" }]);
+        Assert.Equal(1, store.PendingCount);
+
+        await Flusher().FlushAsync();
+
+        var saved = db.AttendanceNotes.Single();
+        Assert.Equal("Booked annual leave", saved.Text);
+        Assert.Equal("leader", saved.UpdatedBy);
+        Assert.Equal(0, store.PendingCount);
+        // A remark never creates an attendance entry, so the day still counts as a default one.
+        Assert.Empty(db.AttendanceEntries);
+
+        store.StageNotes([new StagedNote { EmployeeId = employee.Id, Date = Day, Text = "Moved to Pellet Ass'y", Actor = "leader" }]);
+        await Flusher().FlushAsync();
+        Assert.Equal("Moved to Pellet Ass'y", db.AttendanceNotes.Single().Text);
+
+        store.StageNotes([new StagedNote { EmployeeId = employee.Id, Date = Day, Text = "", Actor = "leader" }]);
+        await Flusher().FlushAsync();
+        Assert.Empty(db.AttendanceNotes);
+    }
+
+    [Fact]
+    public async Task A_remark_survives_putting_the_cell_back_to_default()
+    {
+        var employee = AddEmployee("E1");
+        db.AttendanceEntries.Add(new AttendanceEntry { BusinessDate = Day, Shift = "A", EmployeeId = employee.Id, WorkshopId = workshopId, WorkingHours = 0, LeaveType = LeaveType.Absent, LeaveHours = 10.67m, IsConfirmed = true });
+        db.AttendanceNotes.Add(new AttendanceNote { EmployeeId = employee.Id, BusinessDate = Day, Text = "No call", UpdatedBy = "leader" });
+        db.SaveChanges();
+        store.StageCells([new StagedCell { EmployeeId = employee.Id, Date = Day, Shift = "A", WorkshopId = workshopId, Revert = true, Actor = "leader" }]);
+        await Flusher().FlushAsync();
+        Assert.Empty(db.AttendanceEntries);
+        Assert.Equal("No call", db.AttendanceNotes.Single().Text);
+    }
+
+    [Fact]
+    public void A_remark_edited_during_a_flush_stays_staged()
+    {
+        store.StageNotes([new StagedNote { EmployeeId = 1, Date = Day, Text = "first", Actor = "a" }]);
+        var snapshot = store.Snapshot();
+        store.StageNotes([new StagedNote { EmployeeId = 1, Date = Day, Text = "second", Actor = "b" }]);
+        store.Remove(snapshot);
+        Assert.Equal("second", Assert.Single(store.PendingNotes(_ => true)).Text);
+    }
+
+    [Fact]
+    public void Staged_remarks_survive_a_restart_and_an_old_staging_file_still_loads()
+    {
+        store.StageNotes([new StagedNote { EmployeeId = 1, Date = Day, Text = "OT pellet", Actor = "a" }]);
+        var reloaded = new AttendanceStagingStore(stagingPath, NullLogger<AttendanceStagingStore>.Instance);
+        Assert.Equal(1, reloaded.PendingCount);
+        Assert.Equal("OT pellet", reloaded.PendingNotes(_ => true).Single().Text);
+
+        File.WriteAllText(stagingPath, "{ \"nextVersion\": 5, \"cells\": [], \"manpower\": [] }");
+        Assert.Equal(0, new AttendanceStagingStore(stagingPath, NullLogger<AttendanceStagingStore>.Instance).PendingCount);
+    }
+
+    [Fact]
     public async Task The_morning_run_flushes_then_closes_yesterday_and_does_not_repeat()
     {
         var employee = AddEmployee("E1"); AddEmployee("E2");

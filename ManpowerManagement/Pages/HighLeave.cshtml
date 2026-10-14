@@ -1,13 +1,14 @@
 @page
 @model ManpowerManagement.Pages.HighLeaveModel
 @using System.Globalization
+@using ManpowerManagement.Services
 @{
     ViewData["Title"] = "High leave rate";
     var monthLabel = DateTime.ParseExact(Model.Report.Month, "yyyy-MM", CultureInfo.InvariantCulture).ToString("MMMM yyyy", CultureInfo.InvariantCulture);
 }
 <div class="wd-detail">
-    <a class="wd-back" asp-page="/Index" asp-route-month="@Model.Report.Month" asp-route-workshopId="@Model.Report.WorkshopId">← Back to dashboard</a>
-    <div class="wd-heading"><div><h1>Employees with high leave rate</h1><p>@Model.Report.WorkshopLabel · @monthLabel</p></div><span class="wd-alert-count">@Model.Employees.Count.ToString("N0") above 5%</span></div>
+    <a class="wd-back" asp-page="/Index" asp-route-month="@Model.Report.Month" asp-route-period="@Model.Report.Manpower.Period" asp-route-workshopId="@Model.Report.WorkshopId">← Back to dashboard</a>
+    <div class="wd-heading"><div><h1>Employees with high leave rate</h1><p>@Model.Report.WorkshopLabel · @monthLabel@(Model.Report.Manpower.Period == WorkforceDashboardService.Mtd ? "" : " · " + Model.Report.Manpower.PeriodLabel)</p></div><span class="wd-alert-count">@Model.Employees.Count.ToString("N0") above 5%</span></div>
     <p class="wd-detail-description">Employees whose confirmed leave hours exceed 5% of their scheduled hours. @(Model.Report.PeriodEnd == DateOnly.Parse(Model.Report.Month + "-01") ? "No reporting days yet." : "Data through " + Model.Report.PeriodEnd.AddDays(-1).ToString("dd MMM yyyy", CultureInfo.InvariantCulture) + ".")</p>
     <div class="wd-card wd-table-wrap"><table class="wd-table">
         <thead><tr><th scope="col">Emp ID</th><th scope="col">Name</th><th scope="col">Shift</th><th scope="col">Leave hours</th><th scope="col">Scheduled days</th><th scope="col">Leave rate</th></tr></thead>

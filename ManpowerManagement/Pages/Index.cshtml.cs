@@ -1,16 +1,41 @@
 using ClosedXML.Excel;
+using ManpowerManagement.Models;
 using ManpowerManagement.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace ManpowerManagement.Pages;
 
-public class IndexModel(WorkforceDashboardService dashboard) : PageModel
+public class IndexModel(WorkforceDashboardService dashboard, ReportService reports) : PageModel
 {
-    public WorkforceDashboardService.Report Report { get; private set; } = new();
+    // Same figure as a card on the Absent Ratio report: average of the daily share of A, B and C shift manpower over the chosen period.
+    public record LeaveRatio(string Code, string Name, decimal Ratio, bool IsTotal = false);
 
-    public async Task OnGetAsync(string? month, int? workshopId) =>
-        Report = await dashboard.LoadAsync(month, workshopId);
+    public WorkforceDashboardService.Report Report { get; private set; } = new();
+    public List<LeaveRatio> LeaveRatios { get; private set; } = [];
+
+    public async Task OnGetAsync(string? month, int? workshopId, string? period)
+    {
+        Report = await dashboard.LoadAsync(month, workshopId, period);
+        var scope = Report.WorkshopId is int id ? WorkforceDashboardService.DescendantIds(Report.Workshops, id) : null;
+        var trend = (await reports.LeaveTrendAsync(Report.Month, null, null, workshopScope: scope)).Between(Report.PeriodStart, Report.PeriodEnd.AddDays(-1));
+        LeaveRatios =
+        [
+            new("Total", "Total leave", trend.Average(r => r.Total), true),
+            new("Total", "Total leave (excl. AL)", trend.Average(r => r.TotalWithoutAl), true),
+            .. ReportService.LeaveTypes.Select(t => new LeaveRatio(Attendance.IndexModel.LeaveCodes[t], LeaveName(t), trend.Average(r => r.Of(t))))
+        ];
+    }
+
+    static string LeaveName(LeaveType type) => type switch
+    {
+        LeaveType.AnnualLeave => "Annual leave (AL)",
+        LeaveType.SickLeave => "Sick leave (SL)",
+        LeaveType.BusinessLeave => "Business leave (BL)",
+        LeaveType.OtherLeave => "Other leave (OL)",
+        LeaveType.Absent => "Absent (AB)",
+        _ => "Mother leave (ML)"
+    };
 
     // Keep the existing download endpoint for integrations; the dashboard has no export button.
     public async Task<IActionResult> OnGetExportAsync(string? month, int? workshopId)

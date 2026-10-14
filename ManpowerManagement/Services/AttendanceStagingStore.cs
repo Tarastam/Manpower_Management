@@ -35,6 +35,17 @@ public class StagedManpower
     public DateTime AtUtc { get; set; }
 }
 
+// A remark on one employee's day. Empty text means the remark was cleared, so any stored one is deleted.
+public class StagedNote
+{
+    public int EmployeeId { get; set; }
+    public DateOnly Date { get; set; }
+    public string Text { get; set; } = "";
+    public string Actor { get; set; } = "";
+    public long Version { get; set; }
+    public DateTime AtUtc { get; set; }
+}
+
 public class StagingState
 {
     public long NextVersion { get; set; } = 1;
@@ -43,11 +54,12 @@ public class StagingState
     public DateOnly? LastFinalizedDay { get; set; }
     public List<StagedCell> Cells { get; set; } = [];
     public List<StagedManpower> Manpower { get; set; } = [];
+    public List<StagedNote> Notes { get; set; } = [];
 }
 
-public record StagingSnapshot(List<StagedCell> Cells, List<StagedManpower> Manpower)
+public record StagingSnapshot(List<StagedCell> Cells, List<StagedManpower> Manpower, List<StagedNote> Notes)
 {
-    public bool IsEmpty => Cells.Count == 0 && Manpower.Count == 0;
+    public bool IsEmpty => Cells.Count == 0 && Manpower.Count == 0 && Notes.Count == 0;
 }
 
 // Keeps attendance edits in a file next to the app instead of writing every edit to the shared SQL Server.
@@ -60,6 +72,7 @@ public class AttendanceStagingStore
     readonly ILogger<AttendanceStagingStore> logger;
     readonly Dictionary<(int Employee, DateOnly Date, string Shift), StagedCell> cells = [];
     readonly Dictionary<(int Workshop, string Shift, DateOnly Date), StagedManpower> manpower = [];
+    readonly Dictionary<(int Employee, DateOnly Date), StagedNote> notes = [];
     long nextVersion = 1;
     DateTime? lastSlot;
     DateOnly? lastFinalizedDay;
@@ -75,7 +88,7 @@ public class AttendanceStagingStore
 
     public DateTime? LastSlot { get { lock (gate) return lastSlot; } }
     public DateOnly? LastFinalizedDay { get { lock (gate) return lastFinalizedDay; } }
-    public int PendingCount { get { lock (gate) return cells.Count + manpower.Count; } }
+    public int PendingCount { get { lock (gate) return cells.Count + manpower.Count + notes.Count; } }
 
     public void StageCells(IEnumerable<StagedCell> changes)
     {
@@ -101,6 +114,25 @@ public class AttendanceStagingStore
             }
             Persist();
         }
+    }
+
+    public void StageNotes(IEnumerable<StagedNote> changes)
+    {
+        lock (gate)
+        {
+            foreach (var change in changes)
+            {
+                change.Version = nextVersion++; change.AtUtc = DateTime.UtcNow;
+                notes[(change.EmployeeId, change.Date)] = change;
+            }
+            Persist();
+        }
+    }
+
+    // Pending remarks for the grid to lay over what is stored in SQL (an empty text hides the stored remark).
+    public List<StagedNote> PendingNotes(Func<StagedNote, bool> filter)
+    {
+        lock (gate) return notes.Values.Where(filter).Select(n => Copy(n)).ToList();
     }
 
     // Pending cells for the grid to lay over what is stored in SQL.
@@ -134,7 +166,7 @@ public class AttendanceStagingStore
 
     public StagingSnapshot Snapshot()
     {
-        lock (gate) return new StagingSnapshot(cells.Values.Select(c => Copy(c)).ToList(), manpower.Values.Select(m => Copy(m)).ToList());
+        lock (gate) return new StagingSnapshot(cells.Values.Select(c => Copy(c)).ToList(), manpower.Values.Select(m => Copy(m)).ToList(), notes.Values.Select(n => Copy(n)).ToList());
     }
 
     // Called after SQL accepted the snapshot. An item is only dropped when nobody changed it since the snapshot,
@@ -149,6 +181,9 @@ public class AttendanceStagingStore
             foreach (var m in flushed.Manpower)
                 if (manpower.TryGetValue((m.WorkshopId, m.Shift, m.Date), out var current) && current.Version == m.Version)
                     manpower.Remove((m.WorkshopId, m.Shift, m.Date));
+            foreach (var n in flushed.Notes)
+                if (notes.TryGetValue((n.EmployeeId, n.Date), out var current) && current.Version == n.Version)
+                    notes.Remove((n.EmployeeId, n.Date));
             Persist();
         }
     }
@@ -175,6 +210,11 @@ public class AttendanceStagingStore
         Actor = m.Actor, Version = m.Version, AtUtc = m.AtUtc
     };
 
+    static StagedNote Copy(StagedNote n) => new()
+    {
+        EmployeeId = n.EmployeeId, Date = n.Date, Text = n.Text, Actor = n.Actor, Version = n.Version, AtUtc = n.AtUtc
+    };
+
     void Load()
     {
         if (!File.Exists(path)) return;
@@ -183,6 +223,7 @@ public class AttendanceStagingStore
             var state = JsonSerializer.Deserialize<StagingState>(File.ReadAllText(path), Json) ?? new StagingState();
             foreach (var c in state.Cells) cells[(c.EmployeeId, c.Date, c.Shift)] = c;
             foreach (var m in state.Manpower) manpower[(m.WorkshopId, m.Shift, m.Date)] = m;
+            foreach (var n in state.Notes ?? []) notes[(n.EmployeeId, n.Date)] = n;
             nextVersion = Math.Max(state.NextVersion, 1); lastSlot = state.LastSlot; lastFinalizedDay = state.LastFinalizedDay;
         }
         catch (Exception ex)
@@ -199,7 +240,8 @@ public class AttendanceStagingStore
         var state = new StagingState
         {
             NextVersion = nextVersion, LastSlot = lastSlot, LastFinalizedDay = lastFinalizedDay,
-            Cells = cells.Values.OrderBy(c => c.Version).ToList(), Manpower = manpower.Values.OrderBy(m => m.Version).ToList()
+            Cells = cells.Values.OrderBy(c => c.Version).ToList(), Manpower = manpower.Values.OrderBy(m => m.Version).ToList(),
+            Notes = notes.Values.OrderBy(n => n.Version).ToList()
         };
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";

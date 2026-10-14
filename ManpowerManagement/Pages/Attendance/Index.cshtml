@@ -42,7 +42,7 @@
             name = r.EmployeeName,
             process = r.Process,
             leader = r.IsLeader,
-            cells = r.Cells.Select(c => new { h = c.WorkingHours, lt = (int)c.LeaveType, lh = c.LeaveHours, w = c.WorkshopId, rs = c.IsResigned })
+            cells = r.Cells.Select(c => new { h = c.WorkingHours, lt = (int)c.LeaveType, lh = c.LeaveHours, w = c.WorkshopId, rs = c.IsResigned, n = c.Note })
         })
     };
 }
@@ -130,6 +130,7 @@
                     }
                     <button type="button" class="ag-chip" id="agTransfer" title="Record work in another workshop">Transfer…</button>
                 </div>
+                <button type="button" class="btn ag-tool-btn" id="agNote" title="Add or edit a note on the selected cell (Shift+F2)">Note…</button>
                 <button type="button" class="btn ag-tool-btn" id="agToday">Today</button>
             </div>
 
@@ -138,6 +139,7 @@
                 <ul>
                     <li><strong>Type into a cell</strong>: a number (e.g. <code>7.33</code>) for working hours. A leave code for a full day: <code>AL</code> Annual, <code>SL</code> Sick, <code>BL</code> Business, <code>OL</code> Other, <code>AB</code> Absent, <code>ML</code> Mother. A code plus hours for part of the day, e.g. <code>SL4</code> = 4 hrs sick leave, 6.67 hrs worked.</li>
                     <li><strong>Move</strong> with the arrow keys, Tab or Enter. <strong>Delete</strong> resets a cell to @IndexModel.StandardHours.ToString("0.00") (or OFF). Drag or Shift+click to select several cells, then type and press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to fill them all.</li>
+                    <li><strong>Notes</strong> work like Excel's Add note: select a cell and press <kbd>Shift</kbd>+<kbd>F2</kbd> (or click <strong>Note…</strong>) to record a reason, such as a leave booking or a transfer. Cells with a note show a red corner; hover to read it. <kbd>Enter</kbd> saves, <kbd>Shift</kbd>+<kbd>Enter</kbd> adds a new line. A note belongs to the employee and the day, so it stays when hours are reset.</li>
                     <li><strong>Copy &amp; paste from Excel</strong>: select a cell and press <kbd>Ctrl</kbd>+<kbd>V</kbd>. Pasting one value into a selected range fills the whole range.</li>
                     <li>OFF days (hatched) accept OT hours only. Future dates accept leave only, so leave can be keyed in advance. There is no Submit button: every change is saved as you type and copied to the database at 07:00 and 19:00.</li>
                     <li>Click <strong>Indirect MP</strong> at the bottom of each day and enter the number of indirect people for each working-hour band (10.67 / 8.41 / 7.33). <strong>Direct</strong> = present − indirect, calculated automatically. The daily hour summary uses Total Hours − Indirect Hours for productivity.</li>
@@ -209,6 +211,16 @@
     <div class="modal-header"><div><h2 class="modal-title fs-5" id="agTransferTitle">Transfer to another workshop</h2><p class="mb-0 small text-muted" id="agTransferContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
     <div class="modal-body"><label class="form-label" for="agTransferWorkshop">Worked in</label><select id="agTransferWorkshop" class="form-select" asp-items="Model.WorkshopOptions"></select><p class="small text-muted mt-2 mb-0">The selected cells keep their hours and leave. Only the workshop the hours are counted in changes.</p></div>
     <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="agTransferApply">Apply</button></div>
+</div></div></div>
+
+<div class="modal fade" id="agNoteModal" tabindex="-1" aria-labelledby="agNoteTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><div><h2 class="modal-title fs-5" id="agNoteTitle">Note</h2><p class="mb-0 small text-muted" id="agNoteContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body">
+        <label class="visually-hidden" for="agNoteText">Note</label>
+        <textarea id="agNoteText" class="form-control" rows="4" maxlength="@AttendanceNote.MaxLength" placeholder="e.g. Annual leave booked for 13 May, moved to Pellet Ass'y"></textarea>
+        <div class="d-flex justify-content-between small text-muted mt-1"><span>Enter saves · Shift+Enter new line</span><span id="agNoteCount">0/@AttendanceNote.MaxLength</span></div>
+    </div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline-danger me-auto" id="agNoteDelete" hidden>Delete note</button><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="agNoteSave">Save</button></div>
 </div></div></div>
 
 <div class="modal fade" id="agIndirectModal" tabindex="-1" aria-labelledby="agIndirectTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content">

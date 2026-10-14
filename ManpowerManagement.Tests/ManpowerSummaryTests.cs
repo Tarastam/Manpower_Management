@@ -127,6 +127,55 @@ public class ManpowerSummaryTests : IDisposable
     }
 
     [Fact]
+    public void Period_options_are_mtd_then_monday_to_sunday_weeks_cut_at_the_month_boundaries()
+    {
+        // October 2026 starts on a Thursday; today is Wed 14th, so weeks 4 and 5 have not started.
+        var options = WorkforceDashboardService.PeriodOptions(new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 14));
+        Assert.Equal(["mtd", "w1", "w2", "w3", "w4", "w5"], options.Select(x => x.Key));
+        Assert.Equal(["01/10-04/10", "05/10-11/10", "12/10-18/10", "19/10-25/10", "26/10-31/10"], options.Skip(1).Select(x => x.Range));
+        Assert.Equal(new DateOnly(2026, 10, 14), options[0].AsOf);
+        Assert.Equal(new DateOnly(2026, 10, 4), options[1].AsOf);
+        Assert.Equal(new DateOnly(2026, 10, 14), options[3].AsOf);   // the running week stops at today
+        Assert.Equal([true, true, true, true, false, false], options.Select(x => x.Available));
+    }
+
+    [Fact]
+    public async Task Headcount_follows_the_chosen_week_and_falls_back_to_mtd_for_a_bad_or_future_week()
+    {
+        // March 2026: week 1 is 01-01 Mar (Sun), week 2 is 02-08 Mar. Joined in week 2, left on Mar 5 in week 1's neighbour.
+        var early = Hire("Pellet Line");
+        var joiner = Hire("Pellet Line"); joiner.StartDate = new DateOnly(2026, 3, 4);
+        var leaver = Hire("Pellet Line"); leaver.ResignedDate = new DateOnly(2026, 3, 5); leaver.EmploymentState = EmploymentState.Resigned;
+        db.SaveChanges();
+
+        Assert.Equal(2, (await service.LoadAsync("2026-03", null, "w1")).Manpower.FirstHeadcount);   // 1 Mar: early + leaver
+        Assert.Equal(2, (await service.LoadAsync("2026-03", null, "w2")).Manpower.FirstHeadcount);   // 8 Mar: early + joiner
+        var wrong = (await service.LoadAsync("2026-03", null, "w99")).Manpower;
+        Assert.Equal("mtd", wrong.Period);
+        Assert.Equal(new DateOnly(2026, 3, 31), wrong.AsOf);
+        var week = (await service.LoadAsync("2026-03", null, "W2")).Manpower;
+        Assert.Equal(("w2", "Week 2", new DateOnly(2026, 3, 8)), (week.Period, week.PeriodLabel, week.AsOf!.Value));
+    }
+
+    [Fact]
+    public async Task A_week_limits_the_period_but_the_resigned_list_and_turnover_split_as_expected()
+    {
+        var early = Hire("Pellet Line"); early.ResignedDate = new DateOnly(2026, 3, 3); early.EmploymentState = EmploymentState.Resigned;   // week 1
+        var late = Hire("Polymer"); late.ResignedDate = new DateOnly(2026, 3, 20); late.EmploymentState = EmploymentState.Resigned;           // week 4
+        Hire("Polymer");
+        db.SaveChanges();
+
+        var week = await service.LoadAsync("2026-03", null, "w4");   // 16-22 Mar (1 Mar is a Sunday, so week 1 is a single day)
+        Assert.Equal((new DateOnly(2026, 3, 16), new DateOnly(2026, 3, 23)), (week.PeriodStart, week.PeriodEnd));
+        Assert.Equal([late.EmployeeId, early.EmployeeId], week.ResignedEmployees.Select(x => x.Code));   // whole month, newest first
+        Assert.Equal(1 * 100m / (1 + 0.5m), week.TurnoverRate);   // only the 20 Mar resignation; headcount on 22 Mar is the stayer
+
+        var mtd = await service.LoadAsync("2026-03", null);
+        Assert.Equal(new DateOnly(2026, 3, 1), mtd.PeriodStart);
+        Assert.Equal(2 * 100m / (1 + 1m), mtd.TurnoverRate);
+    }
+
+    [Fact]
     public async Task Ignores_the_workshop_filter()
     {
         Hire("Pellet Line"); Hire("PSLB");

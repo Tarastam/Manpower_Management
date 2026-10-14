@@ -1,7 +1,12 @@
-﻿@{
+@{
     // The menu item for the current page (or its section) is highlighted.
     var currentPage = ViewContext.RouteData.Values["page"] as string ?? "";
     string NavActive(params string[] pages) => pages.Any(p => currentPage == p || currentPage.StartsWith(p + "/")) ? " active" : "";
+    var reportType = Context.Request.Query["type"].ToString();
+    string ReportActive(string type) => currentPage == "/Report/Index" && (reportType == type || (type == "attendance" && reportType is not ("absent" or "hours" or "employees" or "summary"))) ? " active" : "";
+    var canManage = User.IsInRole("Admin") || User.IsInRole("ResignationApprover");
+    var managementActive = NavActive("/Tickets/Manage", "/Admin/Setup", "/Admin/Import", "/Admin/Leaders", "/Admin/WorkingHours", "/SpecialGroups") != "";
+    var reportOpen = NavActive("/Report") != "";
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -13,61 +18,93 @@
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/light-theme.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/dashboard.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/sidebar.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/ManpowerManagement.styles.css" asp-append-version="true" />
+    <script>
+        // Apply the saved sidebar state before first paint so the menu does not jump.
+        try { if (localStorage.getItem("sidebarCollapsed") === "1") document.documentElement.classList.add("sb-collapsed"); } catch (e) { }
+    </script>
 </head>
-<body>
-    <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container">
-                <a class="navbar-brand fw-bold" asp-area="" asp-page="/Index">Manpower Management</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Index", "/HighLeave"))" asp-page="/Index">Dashboard</a></li>
-                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Attendance"))" asp-page="/Attendance/Index">Attendance</a></li>
-                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Employees"))" asp-page="/Employees/Index">Employees</a></li>
-                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/NewHires", "/Admin/NewHireRules"))" asp-page="/NewHires/Index">New Hires</a></li>
-                        <li class="nav-item"><a class="nav-link text-dark@(NavActive("/Tickets/Create"))" asp-page="/Tickets/Create">Resignation Ticket</a></li>
-                        @if (User.IsInRole("Admin") || User.IsInRole("ResignationApprover"))
-                        {
-                            <li class="nav-item dropdown">
-                                <a class="nav-link dropdown-toggle text-dark@(NavActive("/Tickets/Manage", "/Admin/Setup", "/Admin/Import", "/Admin/Leaders", "/Admin/WorkingHours", "/SpecialGroups"))" href="#" id="managementMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">Management</a>
-                                <ul class="dropdown-menu" aria-labelledby="managementMenu">
-                                    <li><a class="dropdown-item@(NavActive("/Tickets/Manage"))" asp-page="/Tickets/Manage">Tickets</a></li>
-                                    @if (User.IsInRole("Admin"))
-                                    {
-                                        <li><a class="dropdown-item@(NavActive("/Admin/Setup", "/Admin/Import"))" asp-page="/Admin/Setup">Admin</a></li>
-                                        <li><a class="dropdown-item@(NavActive("/Admin/Leaders"))" asp-page="/Admin/Leaders">Leaders</a></li>
-                                        <li><a class="dropdown-item@(NavActive("/Admin/WorkingHours"))" asp-page="/Admin/WorkingHours">Working Hour</a></li>
-                                        <li><a class="dropdown-item@(NavActive("/SpecialGroups"))" asp-page="/SpecialGroups/Index">Special Groups</a></li>
-                                    }
-                                </ul>
-                            </li>
-                        }
-                    </ul>
-                    @if (User.Identity?.IsAuthenticated == true) { <span class="small text-muted me-2">@User.Identity.Name</span><form method="post" asp-page="/Account/Logout"><button class="btn btn-outline-secondary btn-sm">Logout</button></form> } else { <a class="btn btn-outline-primary btn-sm" asp-page="/Account/Login">Admin / Approver Login</a> }
-                </div>
-            </div>
-        </nav>
-    </header>
-    <div class="container">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
-    </div>
-
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            &copy; 2026 - ManpowerManagement - <a asp-area="" asp-page="/Privacy">Privacy</a>
+<body class="has-sidebar">
+    <div class="sb-backdrop" id="sbBackdrop"></div>
+    <aside class="sb" id="sidebar" aria-label="Main navigation">
+        <div class="sb-head">
+            <a class="sb-brand" asp-area="" asp-page="/Index" title="Manpower Management">
+                <span class="sb-logo">M</span><span class="sb-text">Manpower Management</span>
+            </a>
+            <button type="button" class="sb-collapse" id="sbCollapse" title="Collapse menu" aria-label="Collapse menu"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
         </div>
-    </footer>
+        <nav class="sb-nav">
+            <ul class="sb-list">
+                <li><a class="sb-link@(NavActive("/Index", "/HighLeave"))" asp-page="/Index" data-tip="Dashboard"><svg class="sb-ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="sb-text">Dashboard</span></a></li>
+                <li><a class="sb-link@(NavActive("/Attendance"))" asp-page="/Attendance/Index" data-tip="Attendance"><svg class="sb-ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/></svg><span class="sb-text">Attendance</span></a></li>
+                <li><a class="sb-link@(NavActive("/Employees"))" asp-page="/Employees/Index" data-tip="Employees"><svg class="sb-ico" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M21 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="sb-text">Employees</span></a></li>
+                <li><a class="sb-link@(NavActive("/NewHires","/Admin/NewHireRules"))" asp-page="/NewHires/Index" data-tip="New Hires"><svg class="sb-ico" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg><span class="sb-text">New Hires</span></a></li>
+                <li><a class="sb-link@(NavActive("/Tickets/Create"))" asp-page="/Tickets/Create" data-tip="Resignation Ticket"><svg class="sb-ico" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span class="sb-text">Resignation Ticket</span></a></li>
+                <li class="sb-group@(reportOpen ? " open" : "")">
+                    <button type="button" class="sb-link sb-toggle@(NavActive("/Report"))" data-tip="Report" aria-expanded="@(reportOpen ? "true" : "false")"><svg class="sb-ico" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg><span class="sb-text">Report</span><svg class="sb-caret" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+                    <ul class="sb-sub">
+                        <li class="sb-sub-title">Report</li>
+                        <li><a class="sb-sublink@(ReportActive("summary"))" asp-page="/Report/Index" asp-route-type="summary">Summary</a></li>
+                        <li><a class="sb-sublink@(ReportActive("attendance"))" asp-page="/Report/Index" asp-route-type="attendance">Attendance (Monthly)</a></li>
+                        <li><a class="sb-sublink@(ReportActive("absent"))" asp-page="/Report/Index" asp-route-type="absent">Absent Ratio</a></li>
+                        <li><a class="sb-sublink@(ReportActive("hours"))" asp-page="/Report/Index" asp-route-type="hours">Working Hour</a></li>
+                        <li><a class="sb-sublink@(ReportActive("employees"))" asp-page="/Report/Index" asp-route-type="employees">Employee List</a></li>
+                    </ul>
+                </li>
+                @if (canManage)
+                {
+                    <li class="sb-group@(managementActive ? " open" : "")">
+                        <button type="button" class="sb-link sb-toggle@(managementActive ? " active" : "")" data-tip="Management" aria-expanded="@(managementActive ? "true" : "false")"><svg class="sb-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="sb-text">Management</span><svg class="sb-caret" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+                        <ul class="sb-sub">
+                            <li class="sb-sub-title">Management</li>
+                            <li><a class="sb-sublink@(NavActive("/Tickets/Manage"))" asp-page="/Tickets/Manage">Tickets</a></li>
+                            @if (User.IsInRole("Admin"))
+                            {
+                                <li><a class="sb-sublink@(NavActive("/Admin/Setup", "/Admin/Import"))" asp-page="/Admin/Setup">Admin</a></li>
+                                <li><a class="sb-sublink@(NavActive("/Admin/Leaders"))" asp-page="/Admin/Leaders">Leaders</a></li>
+                                <li><a class="sb-sublink@(NavActive("/Admin/WorkingHours"))" asp-page="/Admin/WorkingHours">Working Hour</a></li>
+                                <li><a class="sb-sublink@(NavActive("/SpecialGroups"))" asp-page="/SpecialGroups/Index">Special Groups</a></li>
+                            }
+                        </ul>
+                    </li>
+                }
+            </ul>
+        </nav>
+        <div class="sb-foot">
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <div class="sb-user" title="@User.Identity.Name"><svg class="sb-ico" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span class="sb-text">@User.Identity.Name</span></div>
+                <form method="post" asp-page="/Account/Logout"><button class="sb-link" data-tip="Logout"><svg class="sb-ico" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span class="sb-text">Logout</span></button></form>
+            }
+            else
+            {
+                <a class="sb-link" asp-page="/Account/Login" data-tip="Admin / Approver Login"><svg class="sb-ico" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg><span class="sb-text">Admin / Approver Login</span></a>
+            }
+        </div>
+    </aside>
+    <div class="app-main">
+        <div class="sb-topbar">
+            <button type="button" class="sb-burger" id="sbBurger" aria-label="Open menu"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+            <a class="sb-topbar-title" asp-page="/Index">Manpower Management</a>
+        </div>
+        <div class="container">
+            <main role="main" class="pb-3">
+                @RenderBody()
+            </main>
+        </div>
+
+        <footer class="border-top footer text-muted">
+            <div class="container">
+                &copy; 2026 - ManpowerManagement - <a asp-area="" asp-page="/Privacy">Privacy</a>
+            </div>
+        </footer>
+    </div>
 
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
+    <script src="~/js/sidebar.js" asp-append-version="true"></script>
 
     @await RenderSectionAsync("Scripts", required: false)
 </body>
