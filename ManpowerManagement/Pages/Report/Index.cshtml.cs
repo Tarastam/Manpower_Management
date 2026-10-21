@@ -31,6 +31,8 @@ public class IndexModel(ReportService reports, WorkforceDashboardService dashboa
     public ReportService.AttendanceTable AttendanceTable { get; private set; } = new(default, [], []);
     public ReportService.LeaveTrend LeaveTrend { get; private set; } = new(default, [], []);
     public List<LeaveSeries> LeaveSeriesList { get; private set; } = [];
+    // Same list as LeaveSeriesList (same order) per shift A/B/C; empty when a Shift filter is set.
+    public Dictionary<string, List<LeaveSeries>> LeaveSeriesByShift { get; private set; } = [];
     public List<ReportService.HoursRow> HoursRows { get; private set; } = [];
     public List<ReportService.EmployeeRow> EmployeeRows { get; private set; } = [];
     public WorkforceDashboardService.Report DashboardReport { get; private set; } = new();
@@ -50,7 +52,7 @@ public class IndexModel(ReportService reports, WorkforceDashboardService dashboa
 
     // One card and one line chart: the share of all manpower (Day shift excluded) on the given leave types, per day.
     // WithoutAl is the same line with annual leave left out; the chart's "Exclude AL" toggle switches to it.
-    public record LeaveSeries(string Code, string Title, string Detail, List<ReportService.LeavePoint> Points, LeaveSeries? WithoutAl = null)
+    public record LeaveSeries(string Code, string Title, string Detail, List<ReportService.LeavePoint> Points, LeaveSeries? WithoutAl = null, LeaveSeries[]? Layers = null)
     {
         public decimal Average => Points.Count == 0 ? 0 : Points.Average(p => p.Ratio);
     }
@@ -102,19 +104,9 @@ public class IndexModel(ReportService reports, WorkforceDashboardService dashboa
             case Absent:
                 LeaveTrend = await reports.LeaveTrendAsync(Month, WorkshopId, Shift);
                 Month = LeaveTrend.MonthStart.ToString("yyyy-MM");
-                LeaveSeriesList =
-                [
-                    Series(TotalCode, "Total leave", "AL + SL + BL + OL + AB + ML", ReportService.LeaveTypes) with
-                    {
-                        WithoutAl = Series(TotalCode,"Total leave (excl. AL)", "SL + BL + OL + AB + ML", ReportService.LeaveTypes.Where(t => t != LeaveType.AnnualLeave).ToArray())
-                    },
-                    Series("AL", "Annual leave (AL)", "AL", [LeaveType.AnnualLeave]),
-                    Series("SL", "Sick leave (SL)", "SL", [LeaveType.SickLeave]),
-                    Series("BL", "Business leave (BL)", "BL", [LeaveType.BusinessLeave]),
-                    Series("OL", "Other leave (OL)", "OL", [LeaveType.OtherLeave]),
-                    Series("AB", "Absent (AB)", "AB", [LeaveType.Absent]),
-                    Series("ML", "Mother leave (ML)", "ML", [LeaveType.MotherLeave])
-                ];
+                LeaveSeriesList = BuildSeries(LeaveTrend);
+                // The chart's shift buttons switch between these precomputed sets; with a Shift filter already chosen there is nothing to switch.
+                LeaveSeriesByShift = string.IsNullOrEmpty(Shift) ? ReportService.ReportShifts.ToDictionary(s => s, s => BuildSeries(LeaveTrend with { Rows = [.. LeaveTrend.Rows.Where(r => r.Shift == s)] })) : [];
                 break;
             case Employees:
                 EmployeeRows = await reports.EmployeesAsync(WorkshopId, Shift, State);
@@ -128,8 +120,31 @@ public class IndexModel(ReportService reports, WorkforceDashboardService dashboa
         }
     }
 
-    LeaveSeries Series(string code, string title, string detail, LeaveType[] types) =>
-        new(code, title, detail, LeaveTrend.Series(row => types.Sum(row.Of)));
+    static LeaveSeries Series(ReportService.LeaveTrend trend, string code, string title, string detail, LeaveType[] types) =>
+        new(code, title, detail, trend.Series(row => types.Sum(row.Of)));
+
+    static List<LeaveSeries> BuildSeries(ReportService.LeaveTrend trend)
+    {
+        var types = new[]
+        {
+            Series(trend, "AL", "Annual leave (AL)", "AL", [LeaveType.AnnualLeave]),
+            Series(trend, "SL", "Sick leave (SL)", "SL", [LeaveType.SickLeave]),
+            Series(trend, "BL", "Business leave (BL)", "BL", [LeaveType.BusinessLeave]),
+            Series(trend, "OL", "Other leave (OL)", "OL", [LeaveType.OtherLeave]),
+            Series(trend, "AB", "Absent (AB)", "AB", [LeaveType.Absent]),
+            Series(trend, "ML", "Mother leave (ML)", "ML", [LeaveType.MotherLeave])
+        };
+        // The Total chart is stacked: one segment per leave type, so it carries the six type series as layers.
+        return
+        [
+            Series(trend, TotalCode, "Total leave", "AL + SL + BL + OL + AB + ML", ReportService.LeaveTypes) with
+            {
+                Layers = types,
+                WithoutAl = Series(trend, TotalCode, "Total leave (excl. AL)", "SL + BL + OL + AB + ML", ReportService.LeaveTypes.Where(t => t != LeaveType.AnnualLeave).ToArray()) with { Layers = types[1..] }
+            },
+            .. types
+        ];
+    }
 
     static string FileSafe(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : Regex.Replace(value.Trim(), @"[^\w\-]+", "-");

@@ -10,7 +10,7 @@
     var today = BusinessDateService.Current();
     var milestones = new (string Label, DateOnly Date)[]
     {
-        ("Start (day 0)", d.Milestones.Start), ("Decision due (day 60)", d.Milestones.DecisionDue),
+        ("Start (day 0)", d.Milestones.Start), ("Decision due (day 50)", d.Milestones.DecisionDue),
         ("Probation ends (day 90)", d.Milestones.ProbationEnd), ("Latest end (day 119)", d.Milestones.MaxEnd)
     };
 
@@ -47,7 +47,7 @@
     </section>
 
     <section class="wd-card nh-panel" aria-labelledby="dec-title">
-        <div class="wd-panel-heading"><div><h2 id="dec-title">Probation decision</h2><p>The leader decides before day 60: pass, extend (up to day 119 in total) or do not accept. HR acknowledges afterwards.</p></div></div>
+        <div class="wd-panel-heading"><div><h2 id="dec-title">Probation decision</h2><p>The leader decides before day 50: pass, extend (up to day 119 in total) or do not accept. HR acknowledges afterwards.</p></div></div>
         @if (d.CanDecide)
         {
             <form method="post" asp-page-handler="Decision" asp-route-id="@r.Id" class="row g-3">

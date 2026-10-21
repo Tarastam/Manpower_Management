@@ -13,8 +13,15 @@ public static class JobGrades
     // Job grades look like "59T": the leading number is the grade. From this grade up, only Admin or an Approver may edit the employee.
     public const int ApproverOnlyFrom = 59;
 
-    public static bool RequiresApprover(string? jobGrade) =>
-        int.TryParse(new string((jobGrade ?? "").Trim().TakeWhile(char.IsDigit).ToArray()), out var grade) && grade >= ApproverOnlyFrom;
+    // A leader at this grade or above may add employees; 55T and below may not.
+    public const int AddEmployeeFrom = 56;
+
+    public static bool RequiresApprover(string? jobGrade) => AtLeast(jobGrade, ApproverOnlyFrom);
+    public static bool CanAddEmployee(string? jobGrade) => AtLeast(jobGrade, AddEmployeeFrom);
+
+    // A grade with no leading number never qualifies.
+    static bool AtLeast(string? jobGrade, int minimum) =>
+        int.TryParse(new string((jobGrade ?? "").Trim().TakeWhile(char.IsDigit).ToArray()), out var grade) && grade >= minimum;
 }
 
 public enum EmploymentType { NewComer, Permanent }
@@ -167,7 +174,7 @@ public class ResignationTicket
 public enum ProbationDecision { Passed, Extended, NotPassed }
 
 // A leader's probation decision for a new hire (pass / extend / not accepted), kept as history.
-// The decision is due before day 60; HR only acknowledges it.
+// The decision is due before day 50; HR only acknowledges it.
 public class ProbationReview
 {
     public int Id { get; set; }
@@ -236,7 +243,7 @@ public class NewHireRiskSetting
     public int NoShowDays { get; set; } = 3;
     public decimal LeaveRatePercent { get; set; } = 10m;
     public int LeaveRateWindowDays { get; set; } = 14;
-    public int DecisionWarningDay { get; set; } = 50;
+    public int DecisionWarningDay { get; set; } = 40;
 }
 
 public class AuditLog

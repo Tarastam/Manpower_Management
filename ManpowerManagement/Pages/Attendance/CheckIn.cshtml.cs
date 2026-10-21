@@ -43,6 +43,6 @@ public class CheckInModel(AppDbContext db, LeaderSessionService leaderSessions) 
     public IActionResult OnPostSignOut()
     {
         leaderSessions.Clear(HttpContext);
-        return RedirectToPage();
+        return RedirectToPage(new { ReturnPage });
     }
 }

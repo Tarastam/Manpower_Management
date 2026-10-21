@@ -85,9 +85,10 @@ public sealed class ReportService(AppDbContext db, AttendanceStagingStore stagin
     // else the standard hours on a working day. Pregnant-group employees are kept on their own page, as in the grid, so they
     // are only listed when the Pregnant special group is picked: then their cells are the ones of that page (own entries,
     // 8 standard hours, Monday to Friday).
+    // includePregnant lists them among everyone else, each with the cells of their own page (used by the leave trend, where ML only exists for them).
     // workshopScope (a workshop with its sub-workshops) takes the place of workshopId when given.
     // specialGroupId keeps only the members of that special group.
-    public async Task<AttendanceTable> AttendanceMonthAsync(string? month, int? workshopId, string? shift, CancellationToken cancellationToken = default, IReadOnlyCollection<int>? workshopScope = null, int? specialGroupId = null)
+    public async Task<AttendanceTable> AttendanceMonthAsync(string? month, int? workshopId, string? shift, CancellationToken cancellationToken = default, IReadOnlyCollection<int>? workshopScope = null, int? specialGroupId = null, bool includePregnant = false)
     {
         var monthStart = ParseMonth(month);
         var monthEnd = monthStart.AddMonths(1).AddDays(-1);
@@ -96,12 +97,12 @@ public sealed class ReportService(AppDbContext db, AttendanceStagingStore stagin
         var pregnantOnly = specialGroupId is int pid && await db.SpecialGroups.AnyAsync(x => x.Id == pid && x.Name == PregnantModel.GroupName, cancellationToken);
         var roster = db.Employees.AsNoTracking().Where(e => ReportShifts.Contains(e.Shift) && e.StartDate <= monthEnd
             && (e.ResignedDate == null ? e.EmploymentState == EmploymentState.Active : e.ResignedDate >= monthStart)
-            && (pregnantOnly || !e.SpecialGroups.Any(g => g.SpecialGroup!.Name == PregnantModel.GroupName)));
+            && (pregnantOnly || includePregnant || !e.SpecialGroups.Any(g => g.SpecialGroup!.Name == PregnantModel.GroupName)));
         if (workshopScope is not null) roster = roster.Where(e => workshopScope.Contains(e.CurrentWorkshopId));
         else if (workshopId is int w) roster = roster.Where(e => e.CurrentWorkshopId == w);
         if (!string.IsNullOrEmpty(shift)) roster = roster.Where(e => e.Shift == shift);
         if (specialGroupId is int g) roster = roster.Where(e => e.SpecialGroups.Any(x => x.SpecialGroupId == g));
-        var employees = (await roster.Select(e => new { e.Id, e.EmployeeId, e.FullName, e.Process, e.Shift, e.CurrentWorkshopId, Workshop = e.CurrentWorkshop!.Name, e.StartDate, e.ResignedDate })
+        var employees = (await roster.Select(e => new { e.Id, e.EmployeeId, e.FullName, e.Process, e.Shift, e.CurrentWorkshopId, Workshop = e.CurrentWorkshop!.Name, e.StartDate, e.ResignedDate, Pregnant = e.SpecialGroups.Any(g => g.SpecialGroup!.Name == PregnantModel.GroupName) })
             .ToListAsync(cancellationToken))
             .OrderBy(e => e.Workshop, StringComparer.OrdinalIgnoreCase).ThenBy(e => e.Shift).ThenBy(e => e.FullName, StringComparer.OrdinalIgnoreCase).ToList();
         var ids = employees.Select(e => e.Id).ToHashSet();
@@ -132,10 +133,10 @@ public sealed class ReportService(AppDbContext db, AttendanceStagingStore stagin
 
         var today = BusinessDateService.Current();
         var rows = new List<AttendanceRow>(employees.Count);
-        var standardHours = pregnantOnly ? PregnantModel.StandardHours : IndexModel.StandardHours;
         foreach (var employee in employees)
         {
-            var entryShift = pregnantOnly ? PregnantModel.ShiftKey : employee.Shift;
+            var standardHours = employee.Pregnant ? PregnantModel.StandardHours : IndexModel.StandardHours;
+            var entryShift = employee.Pregnant ? PregnantModel.ShiftKey : employee.Shift;
             var cells = new List<string>(days.Count);
             decimal worked = 0, leave = 0, scheduled = 0, absent = 0;
             var notes = new List<string>();
@@ -150,7 +151,7 @@ public sealed class ReportService(AppDbContext db, AttendanceStagingStore stagin
                 if (day < employee.StartDate) { cells.Add(""); dayLeaves.Add(LeaveType.None); dayEmployed.Add(false); continue; }
                 if (employee.ResignedDate is DateOnly last && day > last) { cells.Add(Resigned); dayLeaves.Add(LeaveType.None); dayEmployed.Add(false); continue; }
 
-                var isOffDay = pregnantOnly ? !EffectiveAttendance.IsPregnantWorkingDay(day) : !EffectiveAttendance.IsScheduled(calendar, employee.CurrentWorkshopId, employee.Shift, day);
+                var isOffDay = employee.Pregnant ? !EffectiveAttendance.IsPregnantWorkingDay(day) : !EffectiveAttendance.IsScheduled(calendar, employee.CurrentWorkshopId, employee.Shift, day);
                 var cell = new IndexModel.AttendanceCell { BusinessDate = day, WorkshopId = employee.CurrentWorkshopId, WorkingHours = isOffDay ? 0 : standardHours, IsOffDay = isOffDay, IsConfirmed = true };
                 if (staged.TryGetValue((employee.Id, day, entryShift), out var change))
                 {
@@ -192,7 +193,7 @@ public sealed class ReportService(AppDbContext db, AttendanceStagingStore stagin
     // attendance report, so changes still waiting in the staging file count.
     public async Task<LeaveTrend> LeaveTrendAsync(string? month, int? workshopId, string? shift, CancellationToken cancellationToken = default, IReadOnlyCollection<int>? workshopScope = null)
     {
-        var table = await AttendanceMonthAsync(month, workshopId, shift, cancellationToken, workshopScope);
+        var table = await AttendanceMonthAsync(month, workshopId, shift, cancellationToken, workshopScope, includePregnant: true);
         var today = BusinessDateService.Current();
         var rows = new List<LeaveDayRow>();
         foreach (var group in table.Rows.Where(r => ReportShifts.Contains(r.Shift)).GroupBy(r => (r.Workshop, r.Shift)).OrderBy(g => g.Key.Workshop, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Key.Shift))

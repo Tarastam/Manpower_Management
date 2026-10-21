@@ -6,6 +6,7 @@ body:has(.workforce-dashboard, .wd-detail) .app-main>.container{max-width:1540px
 .wd-heading p{color:var(--wd-muted);font-size:17px;margin:0}
 .wd-card{background:rgba(255,255,255,.9);border:1px solid var(--wd-line);border-radius:12px;box-shadow:0 12px 32px rgba(46,57,104,.08)}
 .wd-filters{display:grid;grid-template-columns:200px minmax(240px,340px) 230px 140px minmax(160px,1fr);align-items:center;gap:10px;margin-bottom:22px}
+.wd-filters-range{grid-template-columns:200px 200px 230px 140px minmax(160px,1fr)}
 .wd-filter-field{min-width:0;min-height:64px;display:flex;flex-direction:column;justify-content:center;background:rgba(255,255,255,.94);border:1px solid var(--wd-line);border-radius:9px;padding:9px 14px;box-shadow:0 5px 16px rgba(46,57,104,.05)}
 .wd-filter-field:focus-within{outline:3px solid var(--wd-accent-dark);outline-offset:2px}
 .wd-filter-field label{display:block;margin:0 0 4px;color:var(--wd-muted);font-size:11px;line-height:1.2;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
@@ -141,7 +142,7 @@ body:has(.workforce-dashboard, .wd-detail) .app-main>.container{max-width:1540px
 .wd-detail .wd-table-wrap{padding:18px}
 .wd-detail .wd-table{min-width:700px}
 .workforce-dashboard a:focus-visible,.workforce-dashboard button:focus-visible,.workforce-dashboard input:focus-visible,.workforce-dashboard select:focus-visible,.wd-detail a:focus-visible{outline:3px solid var(--wd-accent-dark)!important;outline-offset:2px;box-shadow:none!important}
-@media(max-width:1100px){.wd-filters{grid-template-columns:minmax(150px,1fr) minmax(220px,1.6fr) minmax(170px,1fr) 140px}.wd-period-note{grid-column:1/-1;justify-self:start;margin-top:3px}.wd-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.wd-content-grid{grid-template-columns:1fr}}
+@media(max-width:1100px){.wd-filters{grid-template-columns:minmax(150px,1fr) minmax(220px,1.6fr) minmax(170px,1fr) 140px}.wd-filters-range{grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(170px,1.2fr) 140px}.wd-period-note{grid-column:1/-1;justify-self:start;margin-top:3px}.wd-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.wd-content-grid{grid-template-columns:1fr}}
 @media(max-width:700px){.workforce-dashboard,.wd-detail{padding-top:24px}.wd-filters{grid-template-columns:1fr}.wd-period-note{grid-column:auto}.wd-kpis{grid-template-columns:1fr}.wd-kpi{min-height:118px}.wd-mp{padding:14px}.wd-mp-title h2{font-size:20px}.wd-mp-table th,.wd-mp-table td{padding:0 8px;font-size:13px}.wd-panel-heading{flex-direction:column}.wd-high-leave,.wd-leave-chart,.wd-actions{padding:18px}.wd-table{min-width:550px}.wd-heading h1{font-size:31px}.wd-heading p{font-size:15px}}
 
 /* New hire monitoring */
@@ -229,10 +230,20 @@ body:has(.workforce-dashboard, .wd-detail) .app-main>.container{max-width:1540px
 .rp-line{fill:none;stroke:var(--rp-c,#6254d9);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
 .rp-dot{fill:#fff;stroke:var(--rp-c,#6254d9);stroke-width:2}
 .rp-dot:hover{fill:var(--rp-c,#6254d9)}
+.rp-bar{fill:var(--rp-c)}
+.rp-bar:hover{opacity:.8}
+.rp-legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 6px 52px;font-size:12px;font-weight:700}
+.rp-legend span{display:inline-flex;align-items:center;gap:6px;color:var(--rp-c)}
+.rp-legend span::before{content:"";width:10px;height:10px;border-radius:2px;background:var(--rp-c)}
 .rp-avg{stroke:var(--rp-c,#6254d9);stroke-opacity:.6;stroke-width:1.5;stroke-dasharray:6 4}
 .rp-avg-label{fill:var(--rp-c,#6254d9);font-size:11px;font-weight:700}
 .rp-chart-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
 .rp-chart [hidden]{display:none!important}
+.rp-shifts{display:inline-flex;border:1px solid var(--wd-line);border-radius:999px;overflow:hidden;background:#fff}
+.rp-shifts button{border:0;background:none;padding:6px 14px;font-size:13px;font-weight:700;color:var(--rp-c);cursor:pointer}
+.rp-shifts button:hover{background:color-mix(in srgb,var(--rp-c) 10%,#fff)}
+.rp-shifts button.active{background:var(--rp-c);color:#fff}
+.rp-shifts button:focus-visible{outline:2px solid var(--rp-c);outline-offset:-2px}
 .rp-toggle{display:inline-flex;align-items:center;gap:9px;margin:0;font-size:14px;font-weight:700;cursor:pointer;user-select:none}
 .rp-toggle input{position:absolute;opacity:0;width:1px;height:1px}
 .rp-toggle-track{position:relative;width:42px;height:24px;border-radius:12px;background:#c9cfe0;transition:background .15s}

@@ -24,11 +24,11 @@ public sealed class NewHireAccess
 
 public enum NewHirePhase { NotStarted, Evaluating, DecisionSoon, DecisionOverdue, Extended, Passed, NotPassed }
 
-// A new hire is monitored for 90 days. The probation decision is due before day 60, and an extension may run
+// A new hire is monitored for 90 days. The probation decision is due before day 50, and an extension may run
 // up to day 119 in total. Day 0 is the start date.
 public sealed class NewHireMonitorService(AppDbContext db, LeaderSessionService leaderSessions, AttendanceStagingStore staging)
 {
-    public const int DecisionDay = 60;
+    public const int DecisionDay = 50;
     public const int ProbationDays = 90;
     public const int MaxProbationDays = 119;
     public const int ExtensionWarningDays = 10;
@@ -269,7 +269,7 @@ public sealed class NewHireMonitorService(AppDbContext db, LeaderSessionService 
         var deadline = latest is { Decision: ProbationDecision.Extended } ? latest.ExtendedUntil ?? m.ProbationEnd : m.DecisionDue;
         var toDeadline = deadline.DayNumber - today.DayNumber;
         var phase = tenure < 0 ? NewHirePhase.NotStarted
-            : latest is null ? (today >= m.DecisionDue ? NewHirePhase.DecisionOverdue : tenure >= s.DecisionWarningDay ? NewHirePhase.DecisionSoon : NewHirePhase.Evaluating)
+            : latest is null ? (today >= m.DecisionDue ? NewHirePhase.DecisionOverdue : tenure >= Math.Min(s.DecisionWarningDay, DecisionDay - 1) ? NewHirePhase.DecisionSoon : NewHirePhase.Evaluating)
             : latest.Decision switch
             {
                 ProbationDecision.Passed => NewHirePhase.Passed,

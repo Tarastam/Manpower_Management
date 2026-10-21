@@ -30,7 +30,19 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
     // Employees at job grade 59T and above can only be edited by Admin or an Approver.
     public bool CanEditSenior => User.IsInRole(Roles.Admin) || User.IsInRole(Roles.Approver);
     public bool IsLocked(Employee employee) => !CanEditSenior && JobGrades.RequiresApprover(employee.JobGrade);
-    const string SeniorDenied = "Employees at job grade 59T and above can only be added or edited by an Admin or an Approver.";
+    // Same gate as the attendance pages: a checked-in leader or a signed-in Admin / Approver. Everyone allowed in can view and edit
+    // as before, but only Admin / Approver or a leader graded 56T and above can add employees.
+    public bool CanAdd { get; private set; }
+    public LeaderSession? Leader { get; private set; }
+    const string AddDenied = "Only Admin, an Approver, or a leader at job grade 56T and above can add employees.";
+    public override async Task OnPageHandlerExecutionAsync(Microsoft.AspNetCore.Mvc.Filters.PageHandlerExecutingContext context, Microsoft.AspNetCore.Mvc.Filters.PageHandlerExecutionDelegate next)
+    {
+        var leader = Leader = await leaderSessions.ReadAsync(HttpContext, db);
+        if (leader is null && !CanEditSenior) { context.Result = RedirectToPage("/Attendance/CheckIn", new { returnPage = "Employees" }); return; }
+        CanAdd = CanEditSenior || JobGrades.CanAddEmployee(leader is null ? null : await db.Employees.Where(e => e.Id == leader.EmployeeKey).Select(e => e.JobGrade).FirstOrDefaultAsync());
+        await next();
+    }
+    const string SeniorDenied ="Employees at job grade 59T and above can only be added or edited by an Admin or an Approver.";
 
     // Choosing No is open to everyone, but setting or changing the New Employee tag to Yes is limited: Admin may tag any
     // line, a checked-in leader only their own line (the same workshops they can key attendance for).
@@ -70,6 +82,7 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         if (Input.IsNewEmployee == true && Input.StartDate is null) return await ShowError("Start Date is required for a New Employee. Enter the day they actually started.");
         if (Input.StartDate is DateOnly start && !StartDateInRange(start)) return await ShowError(StartDateRangeMessage);
         var employee = Input.Id is int id ? await db.Employees.FindAsync(id) : null;
+        if (employee is null && !CanAdd) return await ShowError(AddDenied);
         if (!CanEditSenior && (JobGrades.RequiresApprover(Input.JobGrade) || (employee is not null && JobGrades.RequiresApprover(employee.JobGrade)))) return await ShowError(SeniorDenied);
         if (await db.Employees.AnyAsync(x => x.EmployeeId == Input.EmployeeId && x.Id != Input.Id)) return await ShowError($"Emp ID '{Input.EmployeeId}' already exists.");
         if (employee is null ? Input.IsNewEmployee == true : employee.IsNewEmployee != Input.IsNewEmployee)
@@ -107,6 +120,7 @@ public class IndexModel(AppDbContext db, LeaderSessionService leaderSessions) : 
         if (unknownGroup is not null) return await ShowError($"Special group '{unknownGroup}' was not found. Add it on the Special Groups page first.");
         var idSet = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
         var existing = (await db.Employees.Where(x => idSet.Contains(x.EmployeeId)).ToListAsync()).ToDictionary(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase); var added = 0;
+        if (!CanAdd && rows.Any(r => !existing.ContainsKey(r.EmployeeId.Trim()))) return await ShowError(AddDenied);
         if (!CanEditSenior && rows.FirstOrDefault(r => JobGrades.RequiresApprover(r.JobGrade) || (existing.TryGetValue(r.EmployeeId.Trim(), out var current) && JobGrades.RequiresApprover(current.JobGrade))) is { } seniorRow) return await ShowError($"Emp ID '{seniorRow.EmployeeId.Trim()}': {SeniorDenied}");
         if (BatchIsNew == "yes" && rows.Any(r => !existing.ContainsKey(r.EmployeeId.Trim())))
         {

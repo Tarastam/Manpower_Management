@@ -126,6 +126,8 @@ public class HourCountingTests : IDisposable
         db.EmployeeSpecialGroups.Add(new EmployeeSpecialGroup { EmployeeId = mother.Id, SpecialGroupId = group.Id }); db.SaveChanges();
         await Hours().FinalizeDayAsync(Day);
         Assert.Equal(10.67m + 8m, Summary("A").TotalHours);
+        // Pregnant hours are all indirect.
+        Assert.Equal(8m, Summary("A").IndirectHours);
     }
 
     [Fact]

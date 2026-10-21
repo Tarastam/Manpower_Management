@@ -28,7 +28,7 @@
         _ => "rp-leave"
     };
 
-    // Line chart of one daily series across the whole month: gridlines, the points (hover for the numbers) and the dashed month average.
+    // Chart of one daily series across the whole month: gridlines, a line with points (or stacked columns when the series has layers; hover for the numbers) and the dashed month average.
     IHtmlContent LeaveChart(IndexModel.LeaveSeries series)
     {
         const double width = 960, height = 230, left = 52, right = 64, top = 16, bottom = 30;
@@ -49,12 +49,34 @@
             svg.Append($"<text class=\"rp-axis\" x=\"{F(X(d))}\" y=\"{F(height - 10)}\" text-anchor=\"middle\">{d.Day}</text>");
         if (series.Points.Count > 0)
         {
-            svg.Append($"<polyline class=\"rp-line\" points=\"{string.Join(' ', series.Points.Select(p => $"{F(X(p.Date))},{F(Y((double)p.Ratio))}"))}\"/>");
-            foreach (var p in series.Points)
-                svg.Append($"<circle class=\"rp-dot\" cx=\"{F(X(p.Date))}\" cy=\"{F(Y((double)p.Ratio))}\" r=\"3.5\"><title>{p.Date:ddd dd MMM}: {p.Ratio:P2} ({p.Leave} of {p.Manpower} people)</title></circle>");
+            if (series.Layers is { } layers)
+            {
+                // Stacked columns: one segment per leave type, bottom to top in the legend order; hover a segment for its people count.
+                var barWidth = days.Count < 2 ? 20 : Math.Min(20, (width - left - right) / (days.Count - 1) * 0.65);
+                foreach (var p in series.Points)
+                {
+                    var below = 0.0;
+                    foreach (var layer in layers)
+                    {
+                        var lp = layer.Points.FirstOrDefault(x => x.Date == p.Date);
+                        if (lp is null || lp.Leave == 0) continue;
+                        var top0 = Y(below + (double)lp.Ratio);
+                        svg.Append($"<rect class=\"rp-bar rp-c-{layer.Code}\" x=\"{F(X(p.Date) - barWidth / 2)}\" y=\"{F(top0)}\" width=\"{F(barWidth)}\" height=\"{F(Y(below) - top0)}\"><title>{p.Date:ddd dd MMM} · {layer.Code}: {lp.Ratio:P2} ({lp.Leave} people) · total {p.Ratio:P2} ({p.Leave} of {p.Manpower})</title></rect>");
+                        below += (double)lp.Ratio;
+                    }
+                }
+            }
+            else
+            {
+                svg.Append($"<polyline class=\"rp-line\" points=\"{string.Join(' ', series.Points.Select(p => $"{F(X(p.Date))},{F(Y((double)p.Ratio))}"))}\"/>");
+                foreach (var p in series.Points)
+                    svg.Append($"<circle class=\"rp-dot\" cx=\"{F(X(p.Date))}\" cy=\"{F(Y((double)p.Ratio))}\" r=\"3.5\"><title>{p.Date:ddd dd MMM}: {p.Ratio:P2} ({p.Leave} of {p.Manpower} people)</title></circle>");
+            }
             svg.Append($"<line class=\"rp-avg\" x1=\"{F(left)}\" x2=\"{F(width - right)}\" y1=\"{F(Y((double)series.Average))}\" y2=\"{F(Y((double)series.Average))}\"/><text class=\"rp-avg-label\" x=\"{F(width - right + 6)}\" y=\"{F(Y((double)series.Average) + 4)}\">avg {series.Average:P2}</text>");
         }
         svg.Append("</svg>");
+        if (series.Layers is { } legend)
+            svg.Insert(0, "<div class=\"rp-legend\">" + string.Concat(legend.Select(l => $"<span class=\"rp-c-{l.Code}\">{l.Code}</span>")) + "</div>");
         return Html.Raw(svg.ToString());
     }
 }
@@ -133,7 +155,8 @@
             <li>One card per leave type (AL SL BL OL AB ML) with its month average. The first chart is Total leave = all six types. A person counts once per day, whatever the leave hours.</li>
             <li>The month average is the average of the daily %. Only days up to the current business day are included. Hover a point to see the people count.</li>
             <li>Uses the same data as the monthly attendance report, including changes not yet copied to SQL. Employees in the Pregnant group are not counted here.</li>
-            <li>Switch on "Exclude AL" above the Total leave chart to draw the line without annual leave.</li>
+            <li>The buttons All / A / B / C on each chart switch it to one shift (% of that shift's manpower). They are not shown when the Shift filter above is set.</li>
+            <li>The Total leave chart is stacked: each column is split by leave type (hover a segment for its people count). Switch on "Exclude AL" above it to draw it without annual leave.</li>
             <li>Download Excel gives the raw table: one row per day, workshop and shift with the manpower, the number of people on each leave type, Total leave including and excluding AL, then each type as a % of manpower (%AL %SL %BL %OL %AB %ML) and %Total Leave including and excluding AL.</li>
         }
         else if (isHours)
@@ -176,27 +199,44 @@
         }
         else
         {
-            @foreach (var series in Model.LeaveSeriesList)
+            @for (var i = 0; i < Model.LeaveSeriesList.Count; i++)
             {
-                <section class="wd-card rp-chart rp-c-@series.Code" aria-label="@series.Title per day" data-rp-toggle-scope>
+                var first = Model.LeaveSeriesList[i];
+                // Shift "" = all shifts (as filtered above); A/B/C are only there when no Shift filter is set.
+                var byShift = new List<(string Shift, IndexModel.LeaveSeries Series)> { ("", first) };
+                byShift.AddRange(Model.LeaveSeriesByShift.Select(kv => (kv.Key, kv.Value[i])));
+                <section class="wd-card rp-chart rp-c-@first.Code" aria-label="@first.Title per day" data-rp-toggle-scope>
                     <div class="wd-panel-heading">
-                        <div><h2>@series.Title per day</h2><p>@series.Detail as % of all manpower (A, B, C shifts)</p></div>
+                        <div><h2>@first.Title per day</h2><p>@first.Detail as % of all manpower (@(string.IsNullOrEmpty(Model.Shift) ? "A, B, C shifts" : "shift " + Model.Shift))</p></div>
                         <div class="rp-chart-tools">
-                            @if (series.WithoutAl is not null)
+                            @if (byShift.Count > 1)
+                            {
+                                <div class="rp-shifts" role="group" aria-label="Shift">
+                                    <button type="button" class="active" data-rp-shift-btn="" aria-pressed="true">All</button>
+                                    @foreach (var s in Model.LeaveSeriesByShift.Keys) { <button type="button" data-rp-shift-btn="@s" aria-pressed="false">@s</button> }
+                                </div>
+                            }
+                            @if (first.WithoutAl is not null)
                             {
                                 <label class="rp-toggle"><input type="checkbox" class="rp-exclude-al" /><span class="rp-toggle-track" aria-hidden="true"></span>Exclude AL</label>
                             }
-                            <span class="wd-alert-count" data-rp-variant="all">Month average @series.Average.ToString("P2")</span>
-                            @if (series.WithoutAl is not null)
+                            @foreach (var (s, series) in byShift)
                             {
-                                <span class="wd-alert-count" data-rp-variant="noal" hidden>Month average excl. AL @series.WithoutAl.Average.ToString("P2")</span>
+                                <span class="wd-alert-count" data-rp-shift="@s" data-rp-variant="all" hidden="@(s != "")">Month average @series.Average.ToString("P2")</span>
+                                @if (series.WithoutAl is not null)
+                                {
+                                    <span class="wd-alert-count" data-rp-shift="@s" data-rp-variant="noal" hidden>Month average excl. AL @series.WithoutAl.Average.ToString("P2")</span>
+                                }
                             }
                         </div>
                     </div>
-                    <div class="rp-chart-scroll" data-rp-variant="all">@LeaveChart(series)</div>
-                    @if (series.WithoutAl is not null)
+                    @foreach (var (s, series) in byShift)
                     {
-                        <div class="rp-chart-scroll" data-rp-variant="noal" hidden>@LeaveChart(series.WithoutAl)</div>
+                        <div class="rp-chart-scroll" data-rp-shift="@s" data-rp-variant="all" hidden="@(s != "")">@LeaveChart(series)</div>
+                        @if (series.WithoutAl is not null)
+                        {
+                            <div class="rp-chart-scroll" data-rp-shift="@s" data-rp-variant="noal" hidden>@LeaveChart(series.WithoutAl)</div>
+                        }
                     }
                 </section>
             }
@@ -278,17 +318,30 @@
             try { saved = localStorage.getItem(key) === '1'; } catch (e) { }
             document.querySelectorAll('[data-rp-toggle-scope]').forEach(function (scope) {
                 var box = scope.querySelector('.rp-exclude-al');
-                if (!box) return;
+                var shift = '';
                 function apply() {
                     scope.querySelectorAll('[data-rp-variant]').forEach(function (el) {
-                        el.hidden = el.getAttribute('data-rp-variant') !== (box.checked ? 'noal' : 'all');
+                        el.hidden = el.getAttribute('data-rp-shift') !== shift || el.getAttribute('data-rp-variant') !== (box && box.checked ? 'noal' : 'all');
                     });
                 }
-                box.checked = saved;
-                box.addEventListener('change', function () {
-                    try { localStorage.setItem(key, box.checked ? '1' : '0'); } catch (e) { }
-                    apply();
+                scope.querySelectorAll('[data-rp-shift-btn]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        shift = btn.getAttribute('data-rp-shift-btn');
+                        scope.querySelectorAll('[data-rp-shift-btn]').forEach(function (b) {
+                            var on = b === btn;
+                            b.classList.toggle('active', on);
+                            b.setAttribute('aria-pressed', on);
+                        });
+                        apply();
+                    });
                 });
+                if (box) {
+                    box.checked = saved;
+                    box.addEventListener('change', function () {
+                        try { localStorage.setItem(key, box.checked ? '1' : '0'); } catch (e) { }
+                        apply();
+                    });
+                }
                 apply();
             });
         })();

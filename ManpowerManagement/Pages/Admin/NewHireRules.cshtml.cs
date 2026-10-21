@@ -13,7 +13,12 @@ public class NewHireRulesModel(AppDbContext db) : PageModel
     [TempData] public string? Message { get; set; }
     public string? Error { get; set; }
 
-    public async Task OnGetAsync() => Rules = await db.NewHireRiskSettings.AsNoTracking().FirstOrDefaultAsync() ?? new NewHireRiskSetting();
+    public async Task OnGetAsync()
+    {
+        Rules = await db.NewHireRiskSettings.AsNoTracking().FirstOrDefaultAsync() ?? new NewHireRiskSetting();
+        // A value saved under the old day-60 deadline would fail the form's own validation.
+        Rules.DecisionWarningDay = Math.Min(Rules.DecisionWarningDay, Services.NewHireMonitorService.DecisionDay - 1);
+    }
 
     public async Task<IActionResult> OnPostAsync()
     {

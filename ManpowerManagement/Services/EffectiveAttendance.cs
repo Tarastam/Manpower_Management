@@ -7,7 +7,7 @@ namespace ManpowerManagement.Services;
 
 // What an employee counts for on one business day. Hours are the keyed entry's working hours when there is one,
 // otherwise the standard hours of a working day.
-public record EffectiveDay(int EmployeeId, DateOnly Date, int WorkshopId, string Shift, decimal Hours, LeaveType Leave, decimal LeaveHours);
+public record EffectiveDay(int EmployeeId, DateOnly Date, int WorkshopId, string Shift, decimal Hours, LeaveType Leave, decimal LeaveHours, bool Pregnant = false);
 
 // Single source of truth for "everyone counts 100% unless a change was keyed".
 // Only exceptions are stored in AttendanceEntries, so a working day with no entry means the standard hours.
@@ -64,12 +64,12 @@ public class EffectiveAttendance(AppDbContext db)
                 if (entryByDay.TryGetValue((person.Id, day), out var entry))
                 {
                     var shift = entry.Shift == PregnantModel.ShiftKey ? person.Shift : entry.Shift;
-                    result.Add(new EffectiveDay(person.Id, day, entry.WorkshopId, shift, entry.WorkingHours, entry.LeaveType, entry.LeaveHours));
+                    result.Add(new EffectiveDay(person.Id, day, entry.WorkshopId, shift, entry.WorkingHours, entry.LeaveType, entry.LeaveHours, person.Pregnant));
                     continue;
                 }
                 if (!person.InRoster || day < person.StartDate || (person.ResignedDate is DateOnly last && day > last)) continue;
                 if (person.Pregnant ? !IsPregnantWorkingDay(day) : !IsScheduled(calendar, person.WorkshopId, person.Shift, day)) continue;
-                result.Add(new EffectiveDay(person.Id, day, person.WorkshopId, person.Shift, person.Pregnant ? PregnantModel.StandardHours : IndexModel.StandardHours, LeaveType.None, 0));
+                result.Add(new EffectiveDay(person.Id, day, person.WorkshopId, person.Shift, person.Pregnant ? PregnantModel.StandardHours : IndexModel.StandardHours, LeaveType.None, 0, person.Pregnant));
             }
         return result;
     }

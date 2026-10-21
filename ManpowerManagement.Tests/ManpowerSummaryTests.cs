@@ -176,6 +176,21 @@ public class ManpowerSummaryTests : IDisposable
     }
 
     [Fact]
+    public async Task A_date_range_limits_every_figure_and_the_resigned_list_to_its_days()
+    {
+        var early = Hire("Pellet Line"); early.ResignedDate = new DateOnly(2026, 3, 3); early.EmploymentState = EmploymentState.Resigned;
+        var late = Hire("Polymer"); late.ResignedDate = new DateOnly(2026, 3, 20); late.EmploymentState = EmploymentState.Resigned;
+        db.SaveChanges();
+
+        var range = await service.LoadAsync(null, null, null, new DateOnly(2026, 3, 10), new DateOnly(2026, 3, 25));
+        Assert.Equal(("2026-03", "custom", new DateOnly(2026, 3, 10), new DateOnly(2026, 3, 26)), (range.Month, range.Manpower.Period, range.PeriodStart, range.PeriodEnd));
+        Assert.Equal([late.EmployeeId], range.ResignedEmployees.Select(x => x.Code));
+
+        var swapped = await service.LoadAsync(null, null, null, new DateOnly(2026, 3, 25), new DateOnly(2026, 3, 10));
+        Assert.Equal((range.PeriodStart, range.PeriodEnd), (swapped.PeriodStart, swapped.PeriodEnd));
+    }
+
+    [Fact]
     public async Task Ignores_the_workshop_filter()
     {
         Hire("Pellet Line"); Hire("PSLB");

@@ -7,6 +7,9 @@
     if (!grid) return;
     const data = JSON.parse(byId('agData').textContent);
     const STD = Number(data.standardHours), MAX_WEEK = Number(data.maxWeeklyHours), today = data.today, canEditPast = data.canEditPast, homeWorkshop = data.workshopId;
+    // The Pregnant page has no Direct / Indirect headcount rows, and each person's own workshop is their home.
+    const hasManpower = data.manpower !== false;
+    const mlModal = byId('agMlModal');
     const leaveCodes = Object.fromEntries(Object.entries(data.leaveCodes).map(([type, code]) => [Number(type), code]));
     const codeToType = Object.fromEntries(Object.entries(leaveCodes).map(([type, code]) => [code, Number(type)]));
     const codePattern = new RegExp(`^(${Object.values(leaveCodes).join('|')})(\\d+(?:\\.\\d+)?)?$`);
@@ -18,8 +21,9 @@
 
     const rows = data.rows.map(row => ({
         ...row,
+        home: row.home || homeWorkshop,
         cells: row.cells.map(c => {
-            const cell = { h: Number(c.h), lt: c.lt, lh: Number(c.lh), w: c.w || homeWorkshop, rs: !!c.rs, err: null, raw: '', n: c.n || '', noteErr: null };
+            const cell = { h: Number(c.h), lt: c.lt, lh: Number(c.lh), w: c.w || row.home || homeWorkshop, rs: !!c.rs, err: null, raw: '', n: c.n || '', noteErr: null };
             cell.orig = { h: cell.h, lt: cell.lt, lh: cell.lh, w: cell.w, n: cell.n };
             return cell;
         })
@@ -28,7 +32,7 @@
     const sum = arr => arr.reduce((a, b) => a + b, 0);
     const manpower = days.map(d => { const ind = d.ind ? [...d.ind] : null; return { direct: d.direct, ind, orig: ind ? ind.join() : '' }; });
     // Attendance leaders are indirect; the daily hour summary deducts their confirmed hours.
-    const leadersPresent = j => rows.filter(row => row.leader && !row.cells[j].err && row.cells[j].h > 0 && row.cells[j].w === homeWorkshop).length;
+    const leadersPresent = j => rows.filter(row => row.leader && !row.cells[j].err && row.cells[j].h > 0 && row.cells[j].w === row.home).length;
     const indirectAt = (m, j) => m.ind ? sum(m.ind) + leadersPresent(j) : null;
 
     // ---------- cell rules ----------
@@ -99,7 +103,7 @@
             }
             return `<tr data-r="${r}">${tds.join('')}</tr>`;
         });
-        const foot = [['present', 'Present (auto)'], ['leave', 'On leave (auto)'], ['indirect', 'Indirect MP'], ['direct', 'Direct MP (auto)']].map(([key, label]) => {
+        const foot = [['present', 'Present (auto)'], ['leave', 'On leave (auto)'], ['indirect', 'Indirect MP'], ['direct', 'Direct MP (auto)']].filter(([key]) => hasManpower || key === 'present' || key === 'leave').map(([key, label]) => {
             const tds = [`<th class="ag-s ag-foot-label" colspan="4">${label}${key === 'direct' ? ' <small>used for productivity</small>' : ''}</th>`];
             for (let w = 0; w < weeks; w++) {
                 for (let j = w * 7; j < w * 7 + 7; j++) {
@@ -135,12 +139,12 @@
             cell.lt && `lt-${cell.lt}`,
             !cell.err && !cell.lt && !days[j].off && cell.h !== STD && 'custom',
             days[j].off && cell.h > 0 && 'ot',
-            cell.w !== homeWorkshop && 'transfer',
+            cell.w !== rows[r].home && 'transfer',
             cell.n && 'has-note',
             cell.err && 'err',
             isLocked(j) && 'locked',
             cell.rs ? 'resigned' : dirty ? 'dirty' : 'ok'].filter(Boolean).join(' ');
-        const base = cell.rs ? 'Resigned: past this employee\'s last working day' : cell.err || (cell.w !== homeWorkshop ? `Worked in ${data.workshops[cell.w] || 'another workshop'}` : '');
+        const base = cell.rs ? 'Resigned: past this employee\'s last working day' : cell.err || (cell.w !== rows[r].home ? `Worked in ${data.workshops[cell.w] || 'another workshop'}` : '');
         el.title = [base, cell.n && `Note: ${cell.n}`].filter(Boolean).join('\n');
         if (selected.has(el)) el.classList.add('sel');
         if (active.r === r && active.j === j) el.classList.add('active');
@@ -158,7 +162,7 @@
 
     function counts(j) {
         let present = 0, leave = 0;
-        rows.forEach(row => { const c = row.cells[j]; if (c.err) return; if (c.h > 0 && c.w === homeWorkshop) present++; if (c.lt) leave++; });
+        rows.forEach(row => { const c = row.cells[j]; if (c.err) return; if (c.h > 0 && c.w === row.home) present++; if (c.lt) leave++; });
         return { present, leave };
     }
 
@@ -166,6 +170,7 @@
         const { present, leave } = counts(j), m = manpower[j];
         presentEls[j].textContent = days[j].off && present === 0 ? '' : present;
         leaveEls[j].textContent = leave || '';
+        if (!hasManpower) return;
         const indirect = indirectAt(m, j);
         if (m.ind || !isManpowerLocked(j)) m.direct = indirect == null ? null : present - indirect;
         indirectEls[j].textContent = indirect ?? '';
@@ -269,7 +274,7 @@
         const row = rows[active.r]; if (!row) return;
         const cell = row.cells[active.j], d = days[active.j], n = selectedCells().length;
         const what = cell.rs ? 'Resigned (past last working day)' : cell.err ? `⚠ ${cell.err}` : cell.lt ? `${leaveName(cell.lt)} ${cell.lh.toFixed(2)} hrs${cell.h ? ` · worked ${cell.h.toFixed(2)} hrs` : ''}` : d.off && cell.h === 0 ? 'OFF day' : `${cell.h.toFixed(2)} hrs${d.off ? ' OT' : ''}`;
-        status.textContent = `${row.name} · ${d.dow} ${d.date} · ${what}${cell.w !== homeWorkshop ? ` · transfer to ${data.workshops[cell.w] || '?'}` : ''}${isLocked(active.j) ? ' · locked (previous date, Admin only)' : ''}${cell.n ? ` · Note: ${cell.n}` : ''}${n > 1 ? ` · ${n} cells selected` : ''}`;
+        status.textContent = `${row.name} · ${d.dow} ${d.date} · ${what}${cell.w !== row.home ? ` · transfer to ${data.workshops[cell.w] || '?'}` : ''}${isLocked(active.j) ? ' · locked (previous date, Admin only)' : ''}${cell.n ? ` · Note: ${cell.n}` : ''}${n > 1 ? ` · ${n} cells selected` : ''}`;
         status.className = 'ag-status' + (cell.err ? ' error' : '');
     }
     const leaveNames = { AL: 'Annual leave', SL: 'Sick leave', BL: 'Business leave', OL: 'Other leave', AB: 'Absent', ML: 'Mother leave' };
@@ -313,6 +318,10 @@
         refreshDirty(); showStatus();
     }
     function applyToCells(targets, text) {
+        // On the Pregnant page a full-day ML (chip or typed) opens the date range pop-up instead.
+        if (mlModal && targets.length && /^ML$/.test(String(text).trim().toUpperCase().replace(/\s+/g, ''))) { openMl(); return; }
+        // Filling a leave code over a range leaves its OFF days alone instead of flagging each one red.
+        if (targets.length > 1 && codePattern.test(String(text).trim().toUpperCase().replace(/\s+/g, ''))) targets = targets.filter(t => !days[t.j].off);
         let skipped = 0; const changed = [];
         targets.forEach(t => { if (setValue(t.r, t.j, text)) changed.push(t); else skipped++; });
         afterChange(changed);
@@ -464,6 +473,41 @@
     byId('agNoteDelete')?.addEventListener('click', () => applyNote(''));
     noteModal?.addEventListener('shown.bs.modal', () => { noteText.focus(); noteText.setSelectionRange(noteText.value.length, noteText.value.length); });
     noteModal?.addEventListener('hidden.bs.modal', () => wrap.focus({ preventScroll: true }));
+
+    // ---------- Mother Leave date range (Pregnant page) ----------
+    // ML is saved for every working day of the range, including dates outside the displayed month.
+    function openMl() {
+        const row = rows[active.r], { j0, j1 } = rect();
+        byId('agMlEmployee').value = row.id;
+        byId('agMlStart').value = days[j0].date; byId('agMlEnd').value = days[j1].date;
+        byId('agMlError').hidden = true;
+        bootstrap.Modal.getOrCreateInstance(mlModal).show();
+    }
+    byId('agMlSave')?.addEventListener('click', async () => {
+        const id = byId('agMlEmployee').value, start = byId('agMlStart').value, end = byId('agMlEnd').value, error = byId('agMlError'), save = byId('agMlSave');
+        if (!start || !end || end < start) { error.textContent = 'Select a valid start and end date.'; error.hidden = false; return; }
+        save.disabled = true; error.hidden = true;
+        try {
+            const url = new URL(location.pathname, location.origin); url.searchParams.set('handler', 'MotherLeave');
+            const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token || '' }, body: new URLSearchParams({ employeeId: id, startDate: start, endDate: end }), credentials: 'same-origin' });
+            if (!response.ok) throw new Error('Could not save ML. Please try again.');
+            const result = await response.json();
+            if (!result.ok) throw new Error(result.error || 'Could not save ML.');
+            const r = rows.findIndex(x => String(x.id) === id), targets = [];
+            days.forEach((d, j) => {
+                if (d.off || d.date < start || d.date > end) return;
+                const c = rows[r].cells[j];
+                Object.assign(c, { h: 0, lt: codeToType.ML, lh: STD, w: rows[r].home, err: null, raw: '' });
+                c.orig = { ...c.orig, h: 0, lt: c.lt, lh: STD, w: c.w };
+                paintCell(r, j); targets.push({ r, j });
+            });
+            afterChange(targets);
+            bootstrap.Modal.getOrCreateInstance(mlModal).hide();
+            showStatus(`Saved ML for ${result.count} working day${result.count === 1 ? '' : 's'}.`);
+        } catch (exception) { error.textContent = exception.message || 'Could not save ML.'; error.hidden = false; }
+        finally { save.disabled = false; }
+    });
+    mlModal?.addEventListener('hidden.bs.modal', () => wrap.focus({ preventScroll: true }));
 
     // ---------- Direct / Indirect ----------
     const indirectModal = byId('agIndirectModal'), indInputs = [...document.querySelectorAll('.ag-ind')];

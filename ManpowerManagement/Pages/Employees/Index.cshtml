@@ -18,7 +18,7 @@
     foreach (var o in dayWorkshopItems.Concat(Model.WorkshopOptions)) o.Selected = Model.Input.WorkshopId != 0 && o.Value == Model.Input.WorkshopId.ToString();
     var groupOptionsHtml = string.Concat(Model.GroupOptions.Select(g => $"<option value=\"{g.Text}\">{g.Text}</option>"));
 }
-<div class="d-flex justify-content-between align-items-center"><div><h1 class="h3 mb-0">Employees</h1></div><div class="d-flex gap-2"><button class="btn btn-primary" data-bs-toggle="collapse" data-bs-target="#employeeForm">Add employee</button></div></div>
+<div class="d-flex justify-content-between align-items-center"><div><h1 class="h3 mb-0">Employees</h1></div><div class="d-flex gap-2">@if (Model.Leader is not null) { <span class="text-muted small align-self-center">Leader: @Model.Leader.Name (@Model.Leader.EmployeeCode)</span><form method="post" asp-page="/Attendance/CheckIn" asp-page-handler="SignOut" asp-route-returnPage="Employees"><button class="btn btn-outline-secondary">Change leader</button></form> }@if (Model.CanAdd) { <button class="btn btn-primary" data-bs-toggle="collapse" data-bs-target="#employeeForm">Add employee</button> } else { <span class="text-muted small align-self-center">Adding employees needs job grade 56T or above.</span> }</div></div>
 <p class="text-muted small mt-2 mb-0">@Model.TagNote@if (Model.TagNeedsCheckIn) { <text> <a asp-page="/Attendance/CheckIn" asp-route-returnPage="Employees">Leader check-in</a></text> }</p>
 @if (Model.Message is not null) { <div class="alert alert-success mt-3">@Model.Message</div> }
 @if (Model.Error is not null) { <div class="alert alert-danger mt-3">@Model.Error</div> }
@@ -38,7 +38,7 @@
         <div class="col-md-3"><label class="form-label" asp-for="Input.Accommodation">Accommodation</label><input class="form-control" asp-for="Input.Accommodation" /></div>
         <div class="col-md-2"><label class="form-label" asp-for="Input.TelephoneNumber">Tel. No</label><input class="form-control" asp-for="Input.TelephoneNumber" /></div>
         <div class="col-md-2"><label class="form-label" for="Input_StatusDisplay">Status</label><input class="form-control" id="Input_StatusDisplay" value="@Model.Input.EmploymentState" readonly disabled /><div class="form-text">Set by resignation ticket</div></div>
-        <div class="col-md-3 single-nonday"><label class="form-label" asp-for="Input.GroupIds">Special Groups</label><select class="form-select" asp-for="Input.GroupIds" asp-items="Model.GroupOptions" multiple size="3"></select></div>
+        <div class="col-md-3 single-nonday"><label class="form-label">Special Groups</label>@foreach (var g in Model.GroupOptions) { <div class="form-check"><input class="form-check-input" type="checkbox" id="group_@g.Value" name="Input.GroupIds" value="@g.Value" checked="@Model.Input.GroupIds.Contains(int.Parse(g.Value))" /><label class="form-check-label" for="group_@g.Value">@g.Text</label></div> }<div class="form-text">Untick Pregnant when she returns from maternity leave.</div></div>
         <div class="col-md-2"><label class="form-label" asp-for="Input.StartDate">Start Date</label><input class="form-control" type="date" asp-for="Input.StartDate" /></div>
         <div class="col-md-2"><label class="form-label" for="Input_IsNewEmployee">New Employee?</label><select class="form-select" id="Input_IsNewEmployee" name="Input.IsNewEmployee" required><option value="">Select Yes / No</option><option value="true" selected="@(Model.Input.IsNewEmployee == true)">Yes</option><option value="false" selected="@(Model.Input.IsNewEmployee == false)">No</option></select><div class="form-text">Yes = a genuinely new hire (monitored)</div></div>
         <div class="col-md-4"><label class="form-label" asp-for="Input.Remark">Remark</label><input class="form-control" asp-for="Input.Remark" /></div>
@@ -61,6 +61,7 @@
         <button type="submit" form="employeeGridForm" id="gridSaveButton" class="btn btn-sm btn-success d-none">Save all changes</button>
         <button type="submit" form="employeeBulkDeleteForm" id="gridBulkDeleteButton" class="btn btn-sm btn-outline-danger d-none" style="@(Model.CanDelete ? "" : "display:none")" disabled>Delete selected</button>
         <button type="button" id="gridCancelButton" class="btn btn-sm btn-outline-secondary d-none">Cancel</button>
+        <span class="align-self-center fw-semibold ms-2">Total head count: <span id="headCount" class="badge bg-primary">@Model.Employees.Count</span></span>
     </div>
 </div>
 <form method="post" asp-page-handler="GridSave" id="employeeGridForm">
@@ -77,7 +78,7 @@
     <th class="sortable" data-sort="text" data-col="8">Accommodation <span class="sort-arrow"></span></th>
     <th class="sortable" data-sort="text" data-col="9">Tel. No <span class="sort-arrow"></span></th>
     <th class="sortable" data-sort="text" data-col="10">Status <span class="sort-arrow"></span></th>
-    <th>Special Groups <span class="text-muted fw-normal small">(ctrl/cmd+click to select or clear)</span></th>
+    <th>Special Groups</th>
     <th class="sortable" data-sort="text" data-col="12">Remark <span class="sort-arrow"></span></th>
     <th></th>
 </tr></thead><tbody>
@@ -170,6 +171,7 @@
                 const match = (!q || text.includes(q)) && (!ws || (row.dataset.workshopPath || row.dataset.workshop || '').split('|').includes(ws)) && (!sh || row.dataset.shift === sh) && (!pr || row.dataset.process === pr) && (!jg || row.dataset.grade === jg) && (!gr || groups.includes(gr)) && (!nw || row.dataset.new === nw);
                 row.classList.toggle('d-none', !match);
             });
+            document.querySelector('#headCount').textContent = listBody.querySelectorAll('tr:not(.d-none)').length;
         }
         filterSearch.addEventListener('input', applyFilters);
         [filterWorkshop, filterShift, filterGrade, filterProcess, filterGroup, filterNew].forEach(el => el.addEventListener('change', applyFilters));
@@ -204,14 +206,24 @@
                     const name = `GridRows[${rowIndex}].${field}`;
                     let input;
                     if (field in multiSelectOptionsHtml) {
-                        input = document.createElement('select');
-                        input.className = 'form-select form-select-sm edit-input d-none';
-                        input.innerHTML = multiSelectOptionsHtml[field];
-                        input.name = name;
-                        input.multiple = true;
-                        input.size = 3;
+                        // One checkbox per group; an unticked box is simply not posted, so unticking removes the group.
+                        input = document.createElement('div');
+                        input.className = 'edit-input d-none';
                         const selectedNames = (td.dataset.value ?? '').split(',').map(v => v.trim()).filter(Boolean);
-                        [...input.options].forEach(option => { option.selected = selectedNames.includes(option.value); });
+                        const options = document.createElement('select');
+                        options.innerHTML = multiSelectOptionsHtml[field];
+                        [...options.options].forEach(option => {
+                            const label = document.createElement('label');
+                            label.className = 'd-block text-nowrap small';
+                            const box = document.createElement('input');
+                            box.type = 'checkbox';
+                            box.className = 'form-check-input me-1';
+                            box.name = name;
+                            box.value = option.value;
+                            box.checked = selectedNames.includes(option.value);
+                            label.append(box, option.value);
+                            input.appendChild(label);
+                        });
                     } else if (field in selectOptionsHtml) {
                         input = document.createElement('select');
                         input.className = 'form-select form-select-sm edit-input d-none';
