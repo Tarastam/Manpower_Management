@@ -14,11 +14,22 @@ public class IndexModel(WorkforceDashboardService dashboard, ReportService repor
     public WorkforceDashboardService.Report Report { get; private set; } = new();
     public List<LeaveRatio> LeaveRatios { get; private set; } = [];
 
-    public async Task OnGetAsync(string? month, int? workshopId, string? period)
+    // Shown in the date pickers: the days the figures cover (a month-to-date when nothing was picked).
+    public DateOnly From => Report.PeriodStart;
+    public DateOnly To => Report.PeriodEnd > Report.PeriodStart ? Report.PeriodEnd.AddDays(-1) : Report.PeriodStart;
+
+    public async Task OnGetAsync(string? month, int? workshopId, string? period, DateOnly? from, DateOnly? to)
     {
-        Report = await dashboard.LoadAsync(month, workshopId, period);
+        Report = await dashboard.LoadAsync(month, workshopId, period, from, to);
         var scope = Report.WorkshopId is int id ? WorkforceDashboardService.DescendantIds(Report.Workshops, id) : null;
-        var trend = (await reports.LeaveTrendAsync(Report.Month, null, null, workshopScope: scope)).Between(Report.PeriodStart, Report.PeriodEnd.AddDays(-1));
+        // The leave trend is built one month at a time; join the months the range touches.
+        var trend = new ReportService.LeaveTrend(default, [], []);
+        for (var m = new DateOnly(From.Year, From.Month, 1); m <= To; m = m.AddMonths(1))
+        {
+            var part = await reports.LeaveTrendAsync(m.ToString("yyyy-MM"), null, null, workshopScope: scope);
+            trend = trend with { Rows = [.. trend.Rows, .. part.Rows] };
+        }
+        trend = trend.Between(Report.PeriodStart, Report.PeriodEnd.AddDays(-1));
         LeaveRatios =
         [
             new("Total", "Total leave", trend.Average(r => r.Total), true),

@@ -52,7 +52,7 @@ public class DailyHoursService(AppDbContext db, EffectiveAttendance effective)
                     : summary.Indirect1067Count * 10.67m
                     + summary.Indirect841Count * 8.41m
                     + summary.Indirect733Count * 7.33m
-                    + group.Where(e => leaders.ContainsKey(e.EmployeeId) && !halfCountLeaderIds.Contains(e.EmployeeId)).Sum(e => e.Hours);
+                    + group.Where(e => e.Pregnant || (leaders.ContainsKey(e.EmployeeId) && !halfCountLeaderIds.Contains(e.EmployeeId))).Sum(e => e.Hours);
             summary.CalculatedAtUtc = DateTime.UtcNow;
         }
         await db.SaveChangesAsync(cancellationToken);

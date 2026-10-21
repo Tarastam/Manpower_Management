@@ -147,6 +147,17 @@ public class ReportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Leave_trend_counts_pregnant_employees_and_their_mother_leave()
+    {
+        AddEmployee("E1");
+        var prg = AddEmployee("PRG", groups: [PregnantModel.GroupName]);
+        db.AttendanceEntries.Add(new AttendanceEntry { BusinessDate = new DateOnly(2026, 3, 4), Shift = PregnantModel.ShiftKey, EmployeeId = prg.Id, WorkshopId = workshopId, WorkingHours = 0, LeaveType = LeaveType.MotherLeave, LeaveHours = 8m, IsConfirmed = true });
+        db.SaveChanges();
+        var fourth = (await service.LeaveTrendAsync(Month, null, null)).Rows.Single(r => r.Date.Day == 4);
+        Assert.Equal((2, 1), (fourth.Manpower, fourth.Of(LeaveType.MotherLeave)));
+    }
+
+    [Fact]
     public async Task Leave_trend_does_not_count_people_before_they_start_or_after_they_resign()
     {
         AddEmployee("OUT", resigned: new DateOnly(2026, 3, 10));

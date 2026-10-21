@@ -24,7 +24,7 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
     // One choice of the period picker above the summary tables: MTD or a week of the month (Monday to Sunday, cut at the month
     // boundaries). AsOf is the day the headcount is taken on; a period that has not started yet is not Available.
     public record PeriodOption(string Key, string Label, string Range, DateOnly From, DateOnly AsOf, bool Available);
-    public const string Mtd = "mtd";
+    public const string Mtd = "mtd", Custom = "custom";
     public sealed class ManpowerSummary
     {
         public string Period { get; init; } = Mtd;
@@ -179,18 +179,30 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
 
     // period: "mtd" (default) or "w1", "w2" ... to cover just that week of the month. Every figure follows it except the
     // Resigned employees list, which always shows the whole month.
-    public async Task<Report> LoadAsync(string? month, int? workshopId, string? period = null)
+    // from / to (both inclusive) pick any date range instead and override month and period; the range is capped at a year.
+    // Then the Resigned employees list follows the range too, and Month is the month of its first day.
+    public async Task<Report> LoadAsync(string? month, int? workshopId, string? period = null, DateOnly? from = null, DateOnly? to = null)
     {
-        var selectedMonth = NormalizeMonth(month);
+        var today = BusinessDateService.Current();
+        var custom = from is not null || to is not null;
+        var lastDay = to ?? today;
+        var firstDay = from ?? new DateOnly(lastDay.Year, lastDay.Month, 1);
+        if (firstDay > lastDay) (firstDay, lastDay) = (lastDay, firstDay);
+        if (lastDay.DayNumber - firstDay.DayNumber > 366) firstDay = lastDay.AddDays(-366);
+        var selectedMonth = custom ? firstDay.ToString("yyyy-MM") : NormalizeMonth(month);
         var start = DateOnly.Parse(selectedMonth + "-01");
         var end = start.AddMonths(1);
-        var today = BusinessDateService.Current();
         var mtdEnd = end <= today ? end : start > today ? start : today.AddDays(1);
         var periods = PeriodOptions(start, today);
-        var chosen = ResolvePeriod(periods, period);
+        var chosen = custom
+            ? new PeriodOption(Custom, $"{firstDay:dd MMM yyyy} – {lastDay:dd MMM yyyy}", $"{firstDay:dd/MM}-{lastDay:dd/MM}", firstDay, lastDay < today ? lastDay : today, true)
+            : ResolvePeriod(periods, period);
         var isMtd = chosen.Key == Mtd;
-        var rangeStart = isMtd ? start : chosen.From;
-        var periodEnd = isMtd ? mtdEnd : chosen.AsOf.AddDays(1);
+        var rangeStart = custom ? firstDay : isMtd ? start : chosen.From;
+        // A range that starts after today has no reporting days: it ends where it starts.
+        var periodEnd = custom ? (chosen.AsOf < firstDay ? firstDay : chosen.AsOf.AddDays(1)) : isMtd ? mtdEnd : chosen.AsOf.AddDays(1);
+        var listStart = custom ? firstDay : start;
+        var listEnd = custom ? lastDay.AddDays(1) : end;
         var workshops = await db.Workshops.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
         if (workshopId is not null && workshops.All(x => x.Id != workshopId)) workshopId = null;
         var scope = workshopId is int id ? DescendantIds(workshops, id) : null;
@@ -280,7 +292,7 @@ public sealed class WorkforceDashboardService(AppDbContext db, AttendanceStaging
                 countsByWorkshop.GetValueOrDefault(id)))
             .OrderByDescending(x => x.Count).ThenBy(x => x.Name).ToList();
         var resignedQuery = db.Employees.AsNoTracking()
-            .Where(x => x.ResignedDate >= start && x.ResignedDate < end);
+            .Where(x => x.ResignedDate >= listStart && x.ResignedDate < listEnd);
         if (scope is not null) resignedQuery = resignedQuery.Where(x => scope.Contains(x.CurrentWorkshopId));
         var resignedPeople = (await resignedQuery.Select(x => new { x.EmployeeId, x.FullName, x.CurrentWorkshopId, x.ResignedDate }).ToListAsync())
             .OrderByDescending(x => x.ResignedDate).ThenBy(x => x.EmployeeId)

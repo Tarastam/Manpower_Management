@@ -17,4 +17,13 @@ public class JobGradeTests
     [InlineData("T59", false)]
     public void Grade59AndAboveRequiresApprover(string? grade, bool expected) =>
         Assert.Equal(expected, JobGrades.RequiresApprover(grade));
+
+    [Theory]
+    [InlineData("56T", true)]
+    [InlineData("59T", true)]
+    [InlineData("55T", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void Grade56AndAboveCanAddEmployee(string? grade, bool expected) =>
+        Assert.Equal(expected, JobGrades.CanAddEmployee(grade));
 }

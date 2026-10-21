@@ -1,18 +1,55 @@
 @page
 @model ManpowerManagement.Pages.Attendance.PregnantModel
+@using System.Globalization
+@using System.Text.Json
 @using ManpowerManagement.Models
+@using ManpowerManagement.Pages.Attendance
 @{
     ViewData["Title"] = "Attendance - Pregnant";
     var today = ManpowerManagement.Services.BusinessDateService.Current();
-    var firstDate = Model.Days.FirstOrDefault();
-    var lastDate = Model.Days.LastOrDefault();
-    var previousMonth = firstDate.AddMonths(-1).ToString("yyyy-MM");
-    var nextMonth = firstDate.AddMonths(1).ToString("yyyy-MM");
+    var prevMonth = Model.MonthStart.AddMonths(-1).ToString("yyyy-MM");
+    var nextMonth = Model.MonthStart.AddMonths(1).ToString("yyyy-MM");
+    var gridData = new
+    {
+        today = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        month = Model.Month,
+        shift = "",
+        standardHours = PregnantModel.StandardHours,
+        maxWeeklyHours = PregnantModel.MaxWeeklyHours,
+        workshopId = 0,
+        manpower = false,
+        isAdmin = User.IsInRole(Roles.Admin),
+        canEditPast = true,
+        leaveCodes = IndexModel.LeaveCodes.ToDictionary(p => ((int)p.Key).ToString(), p => p.Value),
+        workshops = Model.TransferOptions.ToDictionary(o => o.Value, o => o.Text),
+        days = Model.Days.Select(d => new
+        {
+            date = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            day = d.Day,
+            dow = d.ToString("ddd", CultureInfo.InvariantCulture),
+            inMonth = d.Month == Model.MonthStart.Month,
+            off = d.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday,
+            direct = (int?)null,
+            indirect = (int?)null,
+            ind = (int[]?)null,
+            counted = false
+        }),
+        rows = Model.GridRows.Select(r => new
+        {
+            id = r.EmployeeId,
+            code = r.EmployeeCode,
+            name = r.EmployeeName,
+            process = r.Process,
+            leader = false,
+            home = Model.HomeWorkshops[r.EmployeeId],
+            cells = r.Cells.Select(c => new { h = c.WorkingHours, lt = (int)c.LeaveType, lh = c.LeaveHours, w = c.WorkshopId, rs = false, n = c.Note })
+        })
+    };
 }
 
 <div class="attendance-page ag-page pregnant-page">
     <div class="attendance-heading">
-        <div><span class="attendance-eyebrow">WORKFORCE SCHEDULE</span><h1>Attendance</h1><p>Pregnant employees work Monday to Friday. Saturday and Sunday are OFF.</p></div>
+        <div><span class="attendance-eyebrow">WORKFORCE SCHEDULE</span><h1>Attendance</h1><p>Pregnant employees count @PregnantModel.StandardHours.ToString("0.00") hrs Monday to Friday; Saturday and Sunday are OFF. Their hours are counted as indirect hours. Key only the exceptions, the same way as By Shift. Changes are saved automatically and written to the database at 07:00 and 19:00.</p></div>
     </div>
 
     <ul class="nav nav-tabs mb-3">
@@ -26,91 +63,63 @@
     }
 
     <div class="ag-monthbar pregnant-monthbar">
-        <a class="btn ag-icon-btn" asp-route-startMonth="@previousMonth" asp-route-endMonth="@previousMonth" asp-route-workshopId="@Model.WorkshopId" aria-label="Previous month">&#9664;</a>
-        <h2>@firstDate.ToString("MMMM yyyy")</h2>
-        <a class="btn ag-icon-btn" asp-route-startMonth="@nextMonth" asp-route-endMonth="@nextMonth" asp-route-workshopId="@Model.WorkshopId" aria-label="Next month">&#9654;</a>
-        <span class="ag-monthbar-meta">@Model.GridRows.Count employees · Monday–Friday schedule · 8.00 hrs/day</span>
-        <form class="pregnant-month-picker ms-auto" id="attendanceFilters" method="get">
+        <a class="btn ag-icon-btn" asp-route-month="@prevMonth" asp-route-workshopId="@Model.WorkshopId" aria-label="Previous month" data-nav>◀</a>
+        <h2>@Model.MonthStart.ToString("MMMM yyyy")</h2>
+        <a class="btn ag-icon-btn" asp-route-month="@nextMonth" asp-route-workshopId="@Model.WorkshopId" aria-label="Next month" data-nav>▶</a>
+        <span class="ag-monthbar-meta">@Model.GridRows.Count employees · Monday–Friday schedule · @PregnantModel.StandardHours.ToString("0.00") hrs/day</span>
+        <form class="pregnant-month-picker ms-auto" method="get">
+            <input type="hidden" name="month" value="@Model.Month" />
             <label class="visually-hidden" for="workshopFilter">Select workshop</label>
-            <select id="workshopFilter" class="form-select" name="WorkshopId" aria-label="Select workshop" onchange="this.form.requestSubmit()">
+            <select id="workshopFilter" class="form-select" name="WorkshopId" aria-label="Select workshop" data-nav-select onchange="this.form.requestSubmit()">
                 <option value="">All workshops</option>
                 @foreach (var option in Model.WorkshopOptions) { <option value="@option.Value" selected="@(option.Value == Model.WorkshopId?.ToString())">@option.Text</option> }
             </select>
-            <label class="visually-hidden" for="startMonth">Select month</label>
-            <input id="startMonth" class="form-control" type="month" asp-for="StartMonth" aria-label="Select month" />
-            <input id="endMonth" type="hidden" name="EndMonth" value="@Model.StartMonth" />
-            <button class="btn ag-tool-btn">Go</button>
         </form>
     </div>
 
-    @if (!string.IsNullOrEmpty(Model.Error)) { <div class="alert alert-danger" role="alert">@Model.Error</div> }
-
     @if (Model.GridRows.Any())
     {
-        <form method="post" id="attendanceForm">
-            <input type="hidden" asp-for="StartMonth" /><input type="hidden" asp-for="EndMonth" /><input type="hidden" />
-            <div class="ag-toolbar pregnant-toolbar">
-                <div class="attendance-search-actions">
-                    <div class="attendance-search">
-                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                        <label class="visually-hidden" for="attendanceSearch">Search employee</label><input id="attendanceSearch" type="search" placeholder="Search employee" autocomplete="off" />
-                    </div>
-                </div>
-                <div class="ag-fill" role="group" aria-label="Attendance shortcuts"><span class="ag-fill-label">Leave:</span><button type="button" class="ag-chip lt-1" data-leave-shortcut="1" title="Annual leave">AL</button><button type="button" class="ag-chip lt-2" data-leave-shortcut="2" title="Sick leave">SL</button><button type="button" class="ag-chip lt-3" data-leave-shortcut="3" title="Business leave">BL</button><button type="button" class="ag-chip lt-4" data-leave-shortcut="4" title="Other leave">OL</button><button type="button" class="ag-chip lt-5" data-leave-shortcut="5" title="Absent">AB</button><button type="button" class="ag-chip lt-6" id="motherLeaveOpen">ML · Date range</button><button type="button" class="ag-chip" id="pregnantTransfer" title="Record work in another workshop on the selected day">Transfer…</button></div>
-                <button type="button" class="btn ag-tool-btn" id="pregnantNote" title="Add or edit a note on the selected day">Note…</button>
-                <button class="btn ag-tool-btn" id="attendanceToday" type="button">Today</button>
+        <div class="ag-toolbar">
+            <div class="attendance-search">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <label class="visually-hidden" for="agSearch">Search employee</label><input id="agSearch" type="search" placeholder="Search employee" autocomplete="off" />
             </div>
-
-            <details class="ag-help"><summary>How to key attendance</summary><p class="mb-0 mt-2">Click a day to edit hours or leave. Use <strong>ML · Date range</strong> to choose maternity leave dates across any month. Saturday and Sunday remain OFF.</p>
-            <p class="mb-0 mt-2"><strong>Transfer</strong> records that the day was worked in another workshop (the cell turns green with a T). <strong>Notes</strong> record a reason such as a leave booking or a transfer; cells with a note show a red corner, hover to read it. After clicking a day, <strong>Transfer…</strong> and <strong>Note…</strong> reopen that day to edit them.</p></details>
-
-            <div class="attendance-grid-wrap ag-wrap" id="attendanceGridWrap" tabindex="0" aria-label="Attendance calendar table. Scroll horizontally to view all dates.">
-                <table class="attendance-grid pregnant-grid">
-                    <thead>
-                        <tr>
-                            <th class="pregnant-row-no" rowspan="2">No.</th><th class="sticky-id" rowspan="2">Emp ID</th><th class="sticky-name" rowspan="2">Name</th><th class="pregnant-process" rowspan="2">Process</th><th class="pregnant-shift" rowspan="2">Shift</th>
-                            @foreach (var week in Model.WeekGroups) { var sameMonth = week.Start.Month == week.End.Month; <th class="week-heading" colspan="@(week.Count + 1)">@(sameMonth ? $"{week.Start:MMM d} – {week.End:d}" : $"{week.Start:MMM d} – {week.End:MMM d}")</th> }
-                        </tr>
-                        <tr>
-                            @foreach (var week in Model.WeekGroups)
-                            {
-                                var hasSaturday = Enumerable.Range(week.StartIndex, week.Count).Any(index => Model.Days[index].DayOfWeek == DayOfWeek.Saturday);
-                                @for (var j = week.StartIndex; j < week.StartIndex + week.Count; j++) { var day = Model.Days[j]; var weekend = day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday; var addWeeklyTotal = day.DayOfWeek == DayOfWeek.Saturday || (j == week.StartIndex + week.Count - 1 && !hasSaturday); <th class="day-heading @(weekend ? "weekend" : "") @(day == today ? "is-today" : "") @(day > today ? "future" : day < today ? "past" : "")" data-date="@day.ToString("yyyy-MM-dd")" tabindex="-1"><span>@day.Day</span><small>@day.ToString("ddd")</small></th>@if (addWeeklyTotal) { <th class="weekly-heading"><span>Σ</span><small>WEEK</small></th> } }
-                            }
-                        </tr>
-                    </thead>
-                    <tbody id="attendanceRows">
-                    @for (var i = 0; i < Model.GridRows.Count; i++)
-                    {
-                        var row = Model.GridRows[i];
-                        <tr data-row-index="@i">
-                            <td class="pregnant-row-no">@(i + 1)</td>
-                            <td class="sticky-id">@row.EmployeeCode<input type="hidden" name="GridRows[@i].EmployeeId" value="@row.EmployeeId" /><input type="hidden" name="GridRows[@i].EmployeeCode" value="@row.EmployeeCode" /></td>
-                            <td class="sticky-name">@row.EmployeeName<input type="hidden" name="GridRows[@i].EmployeeName" value="@row.EmployeeName" /><input type="hidden" name="GridRows[@i].EmployeeShift" value="@row.EmployeeShift" /></td>
-                            <td class="pregnant-process" title="@row.Process">@row.Process</td>
-                            <td class="pregnant-shift">@row.EmployeeShift</td>
-                            @foreach (var week in Model.WeekGroups)
-                            {
-                                var hasSaturday = Enumerable.Range(week.StartIndex, week.Count).Any(index => Model.Days[index].DayOfWeek == DayOfWeek.Saturday);
-                                @for (var j = week.StartIndex; j < week.StartIndex + week.Count; j++)
-                                {
-                                    var cell = row.Cells[j]; var isFuture = cell.BusinessDate > today; var isToday = cell.BusinessDate == today; var addWeeklyTotal = cell.BusinessDate.DayOfWeek == DayOfWeek.Saturday || (j == week.StartIndex + week.Count - 1 && !hasSaturday); var leave = cell.LeaveType != LeaveType.None; var leaveClass = cell.LeaveType switch { LeaveType.AnnualLeave => "annual", LeaveType.SickLeave => "sick", LeaveType.BusinessLeave => "business", LeaveType.OtherLeave => "other", LeaveType.Absent => "absent", LeaveType.MotherLeave => "mother", _ => "" }; var customHours = !cell.IsOffDay && !leave && cell.WorkingHours != ManpowerManagement.Pages.Attendance.PregnantModel.StandardHours; var state = cell.IsOffDay ? $"off {(cell.WorkingHours > 0 ? "has-ot" : "")}" : leave ? $"leave leave-{leaveClass}" : customHours ? "hours" : "";
-                                    <td class="calendar-cell @(isFuture ? "future" : "past") @(isToday ? "is-today" : "") @state @(cell.WorkshopId != Model.HomeWorkshops[row.EmployeeId] ? "transfer" : "") @(cell.Note != "" ? "has-note" : "")" data-workshop="@cell.WorkshopId" data-home-workshop="@Model.HomeWorkshops[row.EmployeeId]" data-note="@cell.Note" data-date="@cell.BusinessDate.ToString("yyyy-MM-dd")" data-off="@cell.IsOffDay.ToString().ToLowerInvariant()" data-confirmed="@cell.IsConfirmed.ToString().ToLowerInvariant()" data-employee-id="@row.EmployeeId" data-original-hours="@cell.WorkingHours" data-original-leave-type="@((int)cell.LeaveType)" data-original-leave-hours="@cell.LeaveHours">
-                                        <input type="hidden" class="cell-date" name="GridRows[@i].Cells[@j].BusinessDate" value="@cell.BusinessDate" /><input type="hidden" class="cell-hours" name="GridRows[@i].Cells[@j].WorkingHours" value="@cell.WorkingHours" /><input type="hidden" class="cell-leave-type" name="GridRows[@i].Cells[@j].LeaveType" value="@((int)cell.LeaveType)" /><input type="hidden" class="cell-leave-hours" name="GridRows[@i].Cells[@j].LeaveHours" value="@cell.LeaveHours" />
-                                        <button type="button" class="day-button" data-bs-toggle="modal" data-bs-target="#attendanceModal" data-date="@cell.BusinessDate.ToString("yyyy-MM-dd")" aria-label="Edit @row.EmployeeName for @cell.BusinessDate.ToString("d MMMM yyyy")@(cell.IsOffDay ? " OFF day" : "")"><span class="cell-value">@(cell.IsOffDay ? cell.WorkingHours > 0 ? cell.WorkingHours.ToString("0.00") : "OFF" : leave ? cell.LeaveType.ToString().Replace("Leave", "") : cell.WorkingHours.ToString("0.00"))</span><span class="cell-note">@(cell.IsOffDay ? cell.WorkingHours > 0 ? "OT hrs" : "Tap for OT" : leave ? "leave" : "hrs")</span></button>
-                                    </td>
-                                    @if (addWeeklyTotal) { var weeklyHours = row.Cells.Skip(week.StartIndex).Take(week.Count).Sum(c => c.WorkingHours); <td class="weekly-total @(weeklyHours > ManpowerManagement.Pages.Attendance.PregnantModel.MaxWeeklyHours ? "over-limit" : "")" data-week-start-index="@week.StartIndex" data-week-count="@week.Count" tabindex="-1"><output>@weeklyHours.ToString("0.00")</output><small>hrs / @ManpowerManagement.Pages.Attendance.PregnantModel.MaxWeeklyHours.ToString("0") max</small></td> }
-                                }
-                            }
-                        </tr>
-                    }
-                    </tbody>
-                </table>
+            <div class="ag-fill" role="group" aria-label="Fill selected cells">
+                <span class="ag-fill-label">Fill selection:</span>
+                <button type="button" class="ag-chip" data-fill="">@PregnantModel.StandardHours.ToString("0.00")</button>
+                @foreach (var code in IndexModel.LeaveCodes)
+                {
+                    <button type="button" class="ag-chip lt-@((int)code.Key)" data-fill="@code.Value" title="@code.Key">@code.Value</button>
+                }
+                <button type="button" class="ag-chip" id="agTransfer" title="Record work in another workshop">Transfer…</button>
             </div>
-            <div class="attendance-grid-foot"><span>Showing @Model.GridRows.Count employee@(Model.GridRows.Count == 1 ? "" : "s")</span><span>Scroll horizontally to view more dates →</span></div>
-            <div id="attendanceClientError" class="alert alert-danger mt-3 mb-0" role="alert" tabindex="-1" hidden></div>
-            <div class="attendance-save"><span class="text-muted small">Everyone counts 8.00 hrs Monday to Friday. Each change is saved as soon as you apply it and is written to the database at 07:00 and 19:00.</span></div>
-        </form>
+            <button type="button" class="btn ag-tool-btn" id="agNote" title="Add or edit a note on the selected cell (Shift+F2)">Note…</button>
+            <button type="button" class="btn ag-tool-btn" id="agToday">Today</button>
+        </div>
+
+        <details class="ag-help">
+            <summary>How to key attendance</summary>
+            <ul>
+                <li><strong>Type into a cell</strong>: a number (e.g. <code>6</code>) for working hours. A leave code for a full day: <code>AL</code> Annual, <code>SL</code> Sick, <code>BL</code> Business, <code>OL</code> Other, <code>AB</code> Absent, <code>ML</code> Mother. A code plus hours for part of the day, e.g. <code>SL4</code> = 4 hrs sick leave, 4 hrs worked.</li>
+                <li><strong>Move</strong> with the arrow keys, Tab or Enter. <strong>Delete</strong> resets a cell to @PregnantModel.StandardHours.ToString("0.00") (or OFF). Drag or Shift+click to select several cells, then type and press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to fill them all.</li>
+                <li><strong>ML</strong>: click the <strong>ML</strong> chip, or type <code>ML</code> and press Enter, to choose the Mother Leave date range. It is saved for every Monday–Friday in the range, including dates outside the displayed month.</li>
+                <li><strong>Transfer</strong> records that the day was worked in another workshop (the cell turns green). <strong>Notes</strong> work like Excel's Add note: select a cell and press <kbd>Shift</kbd>+<kbd>F2</kbd> (or click <strong>Note…</strong>); cells with a note show a red corner, hover to read it.</li>
+                <li><strong>Copy &amp; paste from Excel</strong>: select a cell and press <kbd>Ctrl</kbd>+<kbd>V</kbd>. Pasting one value into a selected range fills the whole range.</li>
+                <li>OFF days (hatched) accept OT hours only. Future dates accept leave only. There is no Submit button: every change is saved as you type and copied to the database at 07:00 and 19:00.</li>
+            </ul>
+        </details>
+
+        <div class="ag-wrap" id="agWrap" tabindex="0" aria-label="Attendance grid. Use the arrow keys to move and type to edit.">
+            <table class="ag-grid" id="agGrid"></table>
+            <input id="agEditor" class="ag-editor" autocomplete="off" spellcheck="false" hidden />
+        </div>
+        <div class="ag-status" id="agStatus" aria-live="polite"></div>
+
+        @Html.AntiForgeryToken()
+        <div class="ag-submit">
+            <span class="ag-dirty" id="agDirty" role="status" aria-live="polite" hidden></span>
+            <span class="text-muted small">Saved changes are written to the database at 07:00 and 19:00. Until then they show here but not on the dashboard.</span>
+        </div>
     }
     else if (!Model.GroupMissing)
     {
@@ -118,209 +127,33 @@
     }
 </div>
 
-<div class="modal fade" id="attendanceModal" tabindex="-1" aria-labelledby="attendanceModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-    <div class="modal-header"><div><h2 class="modal-title fs-5" id="attendanceModalTitle">Edit attendance</h2><p class="mb-0 small text-muted" id="modalContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-    <div class="modal-body">
-        <fieldset class="mb-3"><legend class="form-label">Attendance type</legend><div class="attendance-choice-grid"><label><input type="radio" name="modalMode" id="modeHours" value="hours" checked><span>Working hours</span></label><label><input type="radio" name="modalMode" id="modeLeave" value="leave"><span>Leave</span></label></div></fieldset>
-        <div id="hoursGroup"><label class="form-label" for="modalHours">Working hours</label><div class="input-group"><input id="modalHours" class="form-control" type="number" min="0" max="8" step="0.01" value="8" /><span class="input-group-text">hrs</span></div></div>
-        <div id="leaveGroup" hidden>
-            <div class="mb-3"><label class="form-label" for="modalLeaveType">Leave type</label><select class="form-select" id="modalLeaveType">@foreach (var item in Html.GetEnumSelectList<LeaveType>().Where(x => x.Value != ((int)LeaveType.None).ToString())) { <option value="@item.Value">@item.Text</option> }</select></div>
-            <fieldset class="mb-3" id="leaveDurationGroup"><legend class="form-label">Leave duration</legend><div class="attendance-choice-grid"><label><input type="radio" name="leaveDuration" id="leaveFullDay" value="full" checked><span>Full Day <small>8.00 hrs</small></span></label><label><input type="radio" name="leaveDuration" id="leavePeriod" value="period"><span>Period</span></label></div></fieldset>
-            <div class="period-group" id="periodGroup" hidden><div><label class="form-label" for="leaveStartTime">From</label><input class="form-control" id="leaveStartTime" type="time" value="08:00" /></div><div><label class="form-label" for="leaveEndTime">To</label><input class="form-control" id="leaveEndTime" type="time" value="12:00" /></div><div class="period-result" aria-live="polite"><span>Leave hours</span><strong id="calculatedLeaveHours">4.00 hrs</strong></div></div>
-            <p class="small text-muted mb-0" id="motherRange" hidden>Save will open the Mother Leave date range calendar.</p>
-        </div>
-        <div class="mt-3"><label class="form-label" for="modalWorkshop">Worked in</label><select id="modalWorkshop" class="form-select" asp-items="Model.TransferOptions"></select><p class="small text-muted mt-1 mb-0">Choose another workshop to record a transfer. The hours and leave stay the same; only the workshop they are counted in changes.</p></div>
-        <div class="mt-3"><label class="form-label" for="modalNote">Note</label><textarea id="modalNote" class="form-control" rows="3" maxlength="@AttendanceNote.MaxLength" placeholder="e.g. Annual leave booked for 13 May, moved to Pellet Ass'y"></textarea><div class="text-end small text-muted mt-1" id="modalNoteCount">0/@AttendanceNote.MaxLength</div></div>
-                <div id="modalError" class="alert alert-danger py-2 mt-3 mb-0 small" role="alert" hidden></div>
-    </div>
-    <div class="modal-footer"><button type="button" class="btn btn-outline-danger me-auto" id="modalClearLeave" hidden>Cancel leave</button><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button><button type="button" class="btn btn-primary" id="modalApply">Save edit</button></div>
+<div class="modal fade" id="agTransferModal" tabindex="-1" aria-labelledby="agTransferTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><div><h2 class="modal-title fs-5" id="agTransferTitle">Transfer to another workshop</h2><p class="mb-0 small text-muted" id="agTransferContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body"><label class="form-label" for="agTransferWorkshop">Worked in</label><select id="agTransferWorkshop" class="form-select" asp-items="Model.TransferOptions"></select><p class="small text-muted mt-2 mb-0">The selected cells keep their hours and leave. Only the workshop the hours are counted in changes.</p></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="agTransferApply">Apply</button></div>
 </div></div></div>
 
-<div class="modal fade" id="motherLeaveModal" tabindex="-1" aria-labelledby="motherLeaveTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-    <div class="modal-header"><div><h2 class="modal-title fs-5" id="motherLeaveTitle">Mother Leave · ML</h2><p class="mb-0 small text-muted">Choose the employee and complete leave period.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+<div class="modal fade" id="agNoteModal" tabindex="-1" aria-labelledby="agNoteTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><div><h2 class="modal-title fs-5" id="agNoteTitle">Note</h2><p class="mb-0 small text-muted" id="agNoteContext"></p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
     <div class="modal-body">
-        <div class="mb-3"><label class="form-label" for="motherEmployee">Employee</label><select class="form-select" id="motherEmployee">@foreach (var row in Model.GridRows) { <option value="@row.EmployeeId">@row.EmployeeCode · @row.EmployeeName</option> }</select></div>
-        <div class="mother-range"><div><label class="form-label" for="motherStartDate">From</label><input class="form-control" id="motherStartDate" type="date" /></div><div><label class="form-label" for="motherEndDate">To</label><input class="form-control" id="motherEndDate" type="date" /></div><p>ML is saved for every Monday–Friday in this period, including dates outside the displayed month. Saturday and Sunday stay OFF. You can select a range of up to 10 years.</p></div>
-        <div id="motherLeaveError" class="alert alert-danger py-2 mt-3 mb-0 small" role="alert" hidden></div>
+        <label class="visually-hidden" for="agNoteText">Note</label>
+        <textarea id="agNoteText" class="form-control" rows="4" maxlength="@AttendanceNote.MaxLength" placeholder="e.g. Annual leave booked for 13 May, moved to Pellet Ass'y"></textarea>
+        <div class="d-flex justify-content-between small text-muted mt-1"><span>Enter saves · Shift+Enter new line</span><span id="agNoteCount">0/@AttendanceNote.MaxLength</span></div>
     </div>
-    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="motherLeaveSave">Save ML</button></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline-danger me-auto" id="agNoteDelete" hidden>Delete note</button><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="agNoteSave">Save</button></div>
 </div></div></div>
 
-<div class="modal fade" id="weeklyLimitModal" tabindex="-1" aria-labelledby="weeklyLimitModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-    <div class="modal-header"><h2 class="modal-title fs-5 text-danger" id="weeklyLimitModalTitle">Not allowed</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-    <div class="modal-body"><p class="mb-0">Working Hours &gt; @ManpowerManagement.Pages.Attendance.PregnantModel.MaxWeeklyHours.ToString("0") Hours per Week</p></div>
-    <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button></div>
+<div class="modal fade" id="agMlModal" tabindex="-1" aria-labelledby="agMlTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><div><h2 class="modal-title fs-5" id="agMlTitle">Mother Leave · ML</h2><p class="mb-0 small text-muted">Choose the employee and the leave period.</p></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body">
+        <div class="mb-3"><label class="form-label" for="agMlEmployee">Employee</label><select class="form-select" id="agMlEmployee">@foreach (var row in Model.GridRows) { <option value="@row.EmployeeId">@row.EmployeeCode · @row.EmployeeName</option> }</select></div>
+        <div class="mother-range"><div><label class="form-label" for="agMlStart">From</label><input class="form-control" id="agMlStart" type="date" /></div><div><label class="form-label" for="agMlEnd">To</label><input class="form-control" id="agMlEnd" type="date" /></div><p>ML is saved for every Monday–Friday in this period, including dates outside the displayed month. Saturday and Sunday stay OFF. You can select a range of up to 10 years.</p></div>
+        <div id="agMlError" class="alert alert-danger py-2 mt-3 mb-0 small" role="alert" hidden></div>
+    </div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="agMlSave">Save ML</button></div>
 </div></div></div>
 
 @section Scripts {
-<script>
-(() => {
-    const standardHours = 8, maxWeeklyHours = @ManpowerManagement.Pages.Attendance.PregnantModel.MaxWeeklyHours.ToString("0"), noLeave = '@((int)LeaveType.None)', motherLeave = '@((int)LeaveType.MotherLeave)', todayIso = '@today.ToString("yyyy-MM-dd")';
-    let activeCell;
-    const byId = id => document.getElementById(id);
-    byId('startMonth')?.addEventListener('change', event => { byId('endMonth').value = event.target.value; });
-    byId('attendanceFilters')?.addEventListener('submit', () => { byId('endMonth').value = byId('startMonth').value; });
-
-    byId('attendanceSearch')?.addEventListener('input', event => { const query = event.target.value.trim().toLowerCase(); document.querySelectorAll('#attendanceRows tr').forEach(row => row.hidden = !row.textContent.toLowerCase().includes(query)); });
-    byId('attendanceToday')?.addEventListener('click', () => {
-        const header = document.querySelector(`.day-heading[data-date="${todayIso}"]`);
-        if (header) { const wrap = byId('attendanceGridWrap'); wrap.scrollTo({ left: Math.max(0, header.offsetLeft - 370), behavior: 'smooth' }); header.focus({ preventScroll: true }); return; }
-        const month = todayIso.slice(0, 7); byId('startMonth').value = month; byId('endMonth').value = month; byId('attendanceFilters').submit();
-    });
-
-    function minutesFromTime(value) { if (!/^\d{2}:\d{2}$/.test(value)) return NaN; const [hours, minutes] = value.split(':').map(Number); return hours * 60 + minutes; }
-    function timeFromMinutes(total) { const safe = Math.max(0, Math.min(1439, total)); return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`; }
-    function showModalError(message) { const error = byId('modalError'); error.textContent = message; error.hidden = false; }
-    function calculatePeriod(showError = false) { const hours = (minutesFromTime(byId('leaveEndTime').value) - minutesFromTime(byId('leaveStartTime').value)) / 60; const valid = Number.isFinite(hours) && hours > 0 && hours <= standardHours; byId('calculatedLeaveHours').textContent = valid ? `${hours.toFixed(2)} hrs` : '—'; if (showError && !valid) showModalError(`Select a period longer than 0 and no more than ${standardHours.toFixed(2)} hours.`); return valid ? Number(hours.toFixed(2)) : NaN; }
-    function updateModalControls() { const isLeave = byId('modeLeave').checked, isMother = isLeave && byId('modalLeaveType').value === motherLeave, isPeriod = isLeave && !isMother && byId('leavePeriod').checked; byId('hoursGroup').hidden = isLeave; byId('leaveGroup').hidden = !isLeave; byId('leaveDurationGroup').hidden = isMother; byId('motherRange').hidden = !isMother; byId('periodGroup').hidden = !isPeriod; byId('modalError').hidden = true; if (isMother) byId('leaveFullDay').checked = true; if (isPeriod) calculatePeriod(); }
-    document.querySelectorAll('input[name="modalMode"], input[name="leaveDuration"]').forEach(input => input.addEventListener('change', updateModalControls));
-    byId('modalLeaveType').addEventListener('change', updateModalControls); byId('leaveStartTime').addEventListener('input', () => calculatePeriod()); byId('leaveEndTime').addEventListener('input', () => calculatePeriod());
-
-    function leaveClass(leaveType) { return ({ '1': 'annual', '2': 'sick', '3': 'business', '4': 'other', '5': 'absent', '6': 'mother' })[leaveType] || ''; }
-    function setCellState(cell, leaveType, isCustom) { const isOff = cell.dataset.off === 'true'; cell.classList.remove('leave', 'leave-annual', 'leave-sick', 'leave-business', 'leave-other', 'leave-absent', 'leave-mother', 'hours', 'has-ot'); if (isOff) { cell.classList.add('off'); cell.classList.toggle('has-ot', Number(cell.querySelector('.cell-hours').value) > 0); } else if (leaveType !== noLeave) { cell.classList.add('leave', `leave-${leaveClass(leaveType)}`); } else if (isCustom) cell.classList.add('hours'); decorateCell(cell); }
-    // A cell counted in a workshop other than the employee's own is a transfer; a note shows a red corner.
-    function workshopName(id) { return [...byId('modalWorkshop').options].find(option => option.value === String(id))?.text || ''; }
-    function decorateCell(cell) {
-        const transfer = cell.dataset.workshop !== cell.dataset.homeWorkshop, note = cell.dataset.note || '';
-        cell.classList.toggle('transfer', transfer); cell.classList.toggle('has-note', note !== '');
-        const tip = [transfer && `Transfer to ${workshopName(cell.dataset.workshop) || '?'}`, note && `Note: ${note}`].filter(Boolean).join('\n');
-        if (tip) cell.title = tip; else cell.removeAttribute('title');
-    }
-    function leaveLabel() { return byId('modalLeaveType').selectedOptions[0].text.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s*Leave$/, '').trim(); }
-    function updateRowTotals(row) { const cells = [...row.querySelectorAll('.calendar-cell')]; let hasOverLimit = false; row.querySelectorAll('.weekly-total').forEach(totalCell => { const start = Number(totalCell.dataset.weekStartIndex), count = Number(totalCell.dataset.weekCount), weeklyHours = cells.slice(start, start + count).reduce((sum, cell) => sum + Number(cell.querySelector('.cell-hours').value || 0), 0); totalCell.querySelector('output').textContent = weeklyHours.toFixed(2); totalCell.classList.toggle('over-limit', weeklyHours > maxWeeklyHours); totalCell.setAttribute('aria-label', `Weekly total ${weeklyHours.toFixed(2)} hours${weeklyHours > maxWeeklyHours ? ', exceeds the ' + maxWeeklyHours + ' hour limit' : ''}`); hasOverLimit ||= weeklyHours > maxWeeklyHours; }); return hasOverLimit; }
-    function syncWeeklyError() { const hasOverLimit = document.querySelector('.weekly-total.over-limit') !== null, error = byId('attendanceClientError'); if (hasOverLimit) { error.className = 'alert alert-danger mt-3 mb-0'; error.textContent = `Weekly working hours exceed the ${maxWeeklyHours}-hour limit. Reduce the hours.`; error.hidden = false; } return hasOverLimit; }
-
-    function openMotherLeave(employeeId, date) {
-        if (employeeId) byId('motherEmployee').value = employeeId;
-        byId('motherStartDate').value = date || todayIso;
-        byId('motherEndDate').value = date || todayIso;
-        byId('motherLeaveError').hidden = true;
-        bootstrap.Modal.getOrCreateInstance(byId('motherLeaveModal')).show();
-    }
-    byId('motherLeaveOpen')?.addEventListener('click', () => openMotherLeave(activeCell?.dataset.employeeId, activeCell?.dataset.date));
-    document.querySelectorAll('[data-leave-shortcut]').forEach(chip => chip.addEventListener('click', () => {
-        if (!activeCell || activeCell.dataset.off === 'true') { byId('attendanceClientError').className = 'alert alert-info mt-3 mb-0'; byId('attendanceClientError').textContent = 'Select a working day in the table, then choose a leave code.'; byId('attendanceClientError').hidden = false; return; }
-        activeCell.querySelector('.day-button').click();
-        byId('modeLeave').checked = true;
-        byId('modalLeaveType').value = chip.dataset.leaveShortcut;
-        byId('leaveFullDay').checked = true;
-        updateModalControls();
-    }));
-    byId('motherLeaveSave').addEventListener('click', async () => {
-        const start = byId('motherStartDate').value, end = byId('motherEndDate').value;
-        const error = byId('motherLeaveError');
-        if (!start || !end || end < start) { error.textContent = 'Select a valid start and end date.'; error.hidden = false; return; }
-        const save = byId('motherLeaveSave'); save.disabled = true; save.textContent = 'Saving…'; error.hidden = true;
-        try {
-            const body = new URLSearchParams({ employeeId: byId('motherEmployee').value, startDate: start, endDate: end });
-            const token = document.querySelector('#attendanceForm input[name="__RequestVerificationToken"]')?.value;
-            const response = await fetch('@Url.Page("Pregnant", "MotherLeave")', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token || '' }, body });
-            if (!response.ok) throw new Error('Could not save ML. Please try again.');
-            const result = await response.json();
-            if (!result.ok) throw new Error(result.error || 'Could not save ML.');
-            const row = [...document.querySelectorAll('#attendanceRows tr')].find(tr => tr.querySelector('.calendar-cell')?.dataset.employeeId === byId('motherEmployee').value);
-            row?.querySelectorAll('.calendar-cell').forEach(cell => {
-                if (cell.dataset.off === 'true' || cell.dataset.date < start || cell.dataset.date > end) return;
-                cell.querySelector('.cell-hours').value = '0.00';
-                cell.querySelector('.cell-leave-type').value = motherLeave;
-                cell.querySelector('.cell-leave-hours').value = standardHours.toFixed(2);
-                cell.querySelector('.cell-value').textContent = 'Mother';
-                cell.querySelector('.cell-note').textContent = 'leave';
-                cell.dataset.originalHours = '0'; cell.dataset.originalLeaveType = motherLeave; cell.dataset.originalLeaveHours = String(standardHours); cell.dataset.confirmed = 'true';
-                setCellState(cell, motherLeave, false);
-            });
-            if (row) updateRowTotals(row);
-            bootstrap.Modal.getOrCreateInstance(byId('motherLeaveModal')).hide();
-            const notice = byId('attendanceClientError'); notice.className = 'alert alert-success mt-3 mb-0'; notice.textContent = `Saved ML for ${result.count} working day${result.count === 1 ? '' : 's'}.`; notice.hidden = false;
-        } catch (exception) { error.textContent = exception.message || 'Could not save ML.'; error.hidden = false; }
-        finally { save.disabled = false; save.textContent = 'Save ML'; }
-    });
-
-    document.querySelectorAll('.day-button').forEach(button => button.addEventListener('click', () => {
-        activeCell = button.closest('.calendar-cell'); const row = button.closest('tr'), isOff = activeCell.dataset.off === 'true', hours = Number(activeCell.querySelector('.cell-hours').value || 0), leaveType = activeCell.querySelector('.cell-leave-type').value, leaveHours = Number(activeCell.querySelector('.cell-leave-hours').value || standardHours), hasLeave = !isOff && leaveType !== noLeave;
-        byId('modalContext').textContent = `${row.querySelector('.sticky-name').childNodes[0].textContent.trim()} · ${button.dataset.date}${isOff ? ' · OFF / OT' : ''}`; byId('modalHours').value = hours.toFixed(2); byId('modalLeaveType').value = hasLeave ? leaveType : byId('modalLeaveType').options[0].value; byId('modeLeave').disabled = isOff; byId('modeLeave').checked = hasLeave; byId('modeHours').checked = !hasLeave; byId('leaveFullDay').checked = !hasLeave || leaveHours >= standardHours; byId('leavePeriod').checked = hasLeave && leaveHours < standardHours; byId('leaveStartTime').value = '08:00'; byId('leaveEndTime').value = timeFromMinutes(8 * 60 + Math.round(Math.min(leaveHours, standardHours) * 60)); byId('motherStartDate').value = button.dataset.date; byId('motherEndDate').value = button.dataset.date; byId('modalClearLeave').hidden = !hasLeave;
-        const workshopSelect = byId('modalWorkshop'); if (![...workshopSelect.options].some(option => option.value === activeCell.dataset.workshop)) workshopSelect.add(new Option(`Workshop ${activeCell.dataset.workshop}`, activeCell.dataset.workshop));
-        workshopSelect.value = activeCell.dataset.workshop; byId('modalNote').value = activeCell.dataset.note || ''; updateNoteCount(); updateModalControls();
-    }));
-    function updateNoteCount() { const note = byId('modalNote'); byId('modalNoteCount').textContent = `${note.value.length}/${note.maxLength}`; }
-    byId('modalNote').addEventListener('input', updateNoteCount);
-
-    // Transfer… and Note… reopen the last clicked day, like the leave shortcuts, with that field focused.
-    function editSelectedDay(focusId) {
-        if (!activeCell) { byId('attendanceClientError').className = 'alert alert-info mt-3 mb-0'; byId('attendanceClientError').textContent = 'Click a day in the table first, then choose Transfer or Note.'; byId('attendanceClientError').hidden = false; return; }
-        byId('attendanceModal').addEventListener('shown.bs.modal', () => byId(focusId).focus(), { once: true });
-        activeCell.querySelector('.day-button').click();
-    }
-    byId('pregnantTransfer')?.addEventListener('click', () => editSelectedDay('modalWorkshop'));
-    byId('pregnantNote')?.addEventListener('click', () => editSelectedDay('modalNote'));
-
-    async function saveCellToServer(cell) {
-        const body = new URLSearchParams({
-            employeeId: cell.dataset.employeeId,
-            businessDate: cell.dataset.date,
-            workingHours: cell.querySelector('.cell-hours').value,
-            leaveType: cell.querySelector('.cell-leave-type').value,
-            leaveHours: cell.querySelector('.cell-leave-hours').value,
-            workedIn: cell.dataset.workshop,
-            StartMonth: '@Model.StartMonth', EndMonth: '@Model.EndMonth'
-        });
-        const token = document.querySelector('#attendanceForm input[name="__RequestVerificationToken"]')?.value;
-        const response = await fetch('@Url.Page("Pregnant", "Cell")', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token || '' }, body });
-        return response.json();
-    }
-
-    async function saveNoteToServer(cell, text) {
-        const body = new URLSearchParams({ employeeId: cell.dataset.employeeId, businessDate: cell.dataset.date, text });
-        const token = document.querySelector('#attendanceForm input[name="__RequestVerificationToken"]')?.value;
-        const response = await fetch('@Url.Page("Pregnant", "Note")', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token || '' }, body });
-        return response.json();
-    }
-
-    byId('modalApply').addEventListener('click', async () => {
-        if (!activeCell) return;
-        const isLeave = byId('modeLeave').checked, leaveType = byId('modalLeaveType').value, isMother = isLeave && leaveType === motherLeave, isPeriod = isLeave && !isMother && byId('leavePeriod').checked, enteredHours = Number(byId('modalHours').value), leaveHours = !isLeave ? 0 : isPeriod ? calculatePeriod(true) : standardHours;
-        if ((!isLeave && (!Number.isFinite(enteredHours) || enteredHours < 0 || enteredHours > standardHours)) || (isLeave && !Number.isFinite(leaveHours))) { if (!isLeave) showModalError(`Enter working hours between 0 and ${standardHours.toFixed(2)}.`); return; }
-        const workshop = byId('modalWorkshop').value, note = byId('modalNote').value.trim(), noteChanged = note !== (activeCell.dataset.note || '');
-        async function saveNote() {
-            if (!noteChanged) return true;
-            try { const result = await saveNoteToServer(activeCell, note); if (!result.ok) { showModalError(result.error || 'Could not save the note.'); return false; } }
-            catch { showModalError('Could not save the note. Check your connection and try again.'); return false; }
-            activeCell.dataset.note = note; decorateCell(activeCell); return true;
-        }
-        if (isMother) {
-            if (!await saveNote()) return;
-            const employeeId = activeCell.dataset.employeeId, date = activeCell.dataset.date;
-            byId('attendanceModal').addEventListener('hidden.bs.modal', () => openMotherLeave(employeeId, date), { once: true });
-            bootstrap.Modal.getOrCreateInstance(byId('attendanceModal')).hide();
-            return;
-        }
-        activeCell.dataset.workshop = workshop;
-        const row = activeCell.closest('tr'); let targets = [activeCell];
-        const workingHours = isLeave ? Math.max(0, standardHours - leaveHours) : enteredHours;
-        targets.forEach(cell => { const isOff = cell.dataset.off === 'true'; cell.querySelector('.cell-hours').value = workingHours.toFixed(2); cell.querySelector('.cell-leave-type').value = isLeave ? leaveType : noLeave; cell.querySelector('.cell-leave-hours').value = isLeave ? leaveHours.toFixed(2) : '0.00'; cell.querySelector('.cell-value').textContent = isOff ? workingHours > 0 ? workingHours.toFixed(2) : 'OFF' : isLeave ? leaveLabel() : workingHours.toFixed(2); cell.querySelector('.cell-note').textContent = isOff ? workingHours > 0 ? 'OT hrs' : 'Tap for OT' : isLeave ? (isPeriod ? `${leaveHours.toFixed(2)}h leave` : 'leave') : 'hrs'; setCellState(cell, isLeave ? leaveType : noLeave, !isLeave && workingHours !== standardHours); });
-        updateRowTotals(row); syncWeeklyError();
-
-        {
-            byId('modalApply').disabled = true;
-            try {
-                for (const cell of targets) {
-                    const result = await saveCellToServer(cell);
-                    if (!result.ok) { showModalError(result.error || 'Could not save this day.'); byId('modalApply').disabled = false; return; }
-                }
-                if (!await saveNote()) { byId('modalApply').disabled = false; return; }
-            } catch { showModalError('Could not save this day. Check your connection and try again.'); byId('modalApply').disabled = false; return; }
-            byId('modalApply').disabled = false;
-        }
-        bootstrap.Modal.getOrCreateInstance(byId('attendanceModal')).hide();
-    });
-    byId('modalClearLeave').addEventListener('click', () => {
-        if (!activeCell) return;
-        const restoredHours = activeCell.dataset.off === 'true' ? 0 : standardHours; activeCell.querySelector('.cell-hours').value = restoredHours.toFixed(2); activeCell.querySelector('.cell-leave-type').value = noLeave; activeCell.querySelector('.cell-leave-hours').value = '0.00'; activeCell.querySelector('.cell-value').textContent = activeCell.dataset.off === 'true' ? 'OFF' : restoredHours.toFixed(2); activeCell.querySelector('.cell-note').textContent = activeCell.dataset.off === 'true' ? 'Tap for OT' : 'hrs'; setCellState(activeCell, noLeave, false); updateRowTotals(activeCell.closest('tr')); syncWeeklyError();
-        saveCellToServer(activeCell).then(result => { if (!result.ok) { byId('attendanceClientError').className = 'alert alert-danger mt-3 mb-0'; byId('attendanceClientError').textContent = result.error || 'Could not save this day.'; byId('attendanceClientError').hidden = false; } }).catch(() => { byId('attendanceClientError').className = 'alert alert-danger mt-3 mb-0'; byId('attendanceClientError').textContent = 'Could not save this day. Check your connection and try again.'; byId('attendanceClientError').hidden = false; });
-        bootstrap.Modal.getOrCreateInstance(byId('attendanceModal')).hide();
-    });
-
-    document.querySelectorAll('.calendar-cell').forEach(decorateCell);
-})();
-</script>
+<script id="agData" type="application/json">@Html.Raw(JsonSerializer.Serialize(gridData))</script>
+<script src="~/js/attendance-grid.js" asp-append-version="true"></script>
 }

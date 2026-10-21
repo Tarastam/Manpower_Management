@@ -19,14 +19,18 @@
     <div class="wd-heading">
         <div>
             <h1>Workforce overview</h1>
-            <p>@monthLabel · @(mp.Period == WorkforceDashboardService.Mtd ? "MTD" : mp.PeriodLabel) · @report.WorkshopLabel</p>
+            <p>@(mp.Period == WorkforceDashboardService.Custom ? "" : monthLabel + " · ")@periodLabel · @report.WorkshopLabel</p>
         </div>
     </div>
 
-    <form class="wd-filters" method="get">
+    <form class="wd-filters wd-filters-range" method="get">
         <div class="wd-filter-field wd-month">
-            <label for="dashboard-month">Month</label>
-            <input id="dashboard-month" type="month" name="month" value="@report.Month" />
+            <label for="dashboard-from">From</label>
+            <input id="dashboard-from" type="date" name="from" value="@Model.From.ToString("yyyy-MM-dd")" />
+        </div>
+        <div class="wd-filter-field wd-month">
+            <label for="dashboard-to">To</label>
+            <input id="dashboard-to" type="date" name="to" value="@Model.To.ToString("yyyy-MM-dd")" />
         </div>
         <div class="wd-workshop-picker" id="dashboard-workshop-picker">
             <div class="wd-filter-field wd-workshop">
@@ -45,15 +49,6 @@
                 <div class="wd-workshop-level" id="dashboard-workshop-level"></div>
                 <div class="wd-workshop-results" id="dashboard-workshop-results" aria-live="polite"></div>
             </div>
-        </div>
-        <div class="wd-filter-field wd-period">
-            <label for="dashboard-period">Period</label>
-            <select id="dashboard-period" name="period">
-                @foreach (var option in mp.Periods)
-                {
-                    <option value="@option.Key" selected="@(option.Key == mp.Period)" disabled="@(!option.Available)">@option.Label (@option.Range)</option>
-                }
-            </select>
         </div>
         <button class="wd-apply" type="submit">Apply filters</button>
         <p class="wd-period-note">@periodNote</p>
@@ -116,7 +111,7 @@
                         {
                             @foreach (var row in report.WorkshopRows)
                             {
-                                <tr><td class="wd-workshop-name" title="@row.Name">@row.Name</td><td><strong>@row.Count.ToString("N0")</strong></td><td><a asp-page="/HighLeave" asp-route-month="@report.Month" asp-route-period="@mp.Period" asp-route-workshopId="@row.Id">View <span aria-hidden="true">→</span><span class="visually-hidden"> employees in @row.Name</span></a></td></tr>
+                                <tr><td class="wd-workshop-name" title="@row.Name">@row.Name</td><td><strong>@row.Count.ToString("N0")</strong></td><td><a asp-page="/HighLeave" asp-route-month="@report.Month" asp-route-period="@mp.Period" asp-route-from="@Model.From.ToString("yyyy-MM-dd")" asp-route-to="@Model.To.ToString("yyyy-MM-dd")" asp-route-workshopId="@row.Id">View <span aria-hidden="true">→</span><span class="visually-hidden"> employees in @row.Name</span></a></td></tr>
                             }
                         }
                         </tbody>
@@ -127,7 +122,7 @@
 
             <section class="wd-card wd-high-leave wd-resigned" aria-labelledby="resigned-title">
                 <div class="wd-panel-heading">
-                    <div><h2 id="resigned-title">Resigned employees</h2><p>Last working day in @monthLabel (whole month, not affected by the period)</p></div>
+                    <div><h2 id="resigned-title">Resigned employees</h2><p>Last working day in @(mp.Period == WorkforceDashboardService.Custom ? periodLabel : monthLabel + " (whole month, not affected by the period)")</p></div>
                     <span class="wd-alert-count">@report.ResignedEmployees.Count.ToString("N0") resigned</span>
                 </div>
                 <div class="wd-table-wrap wd-high-leave-scroll" tabindex="0" role="region" aria-label="Resigned employees, scrollable">
@@ -148,7 +143,7 @@
                         </tbody>
                     </table>
                 </div>
-                <p class="wd-method-note">@(report.ResignedEmployees.Count > 5 ? $"Latest 5 of {report.ResignedEmployees.Count} shown; scroll for the rest. " : "")Follows the month and workshop filters above, but not the period.</p>
+                <p class="wd-method-note">@(report.ResignedEmployees.Count > 5 ? $"Latest 5 of {report.ResignedEmployees.Count} shown; scroll for the rest. " : "")Follows the date range and workshop filters above.</p>
             </section>
 
             <section class="wd-card wd-actions" aria-labelledby="actions-title">
