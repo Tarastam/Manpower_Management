@@ -147,8 +147,8 @@ public sealed class NewHireMonitorService(AppDbContext db, LeaderSessionService 
     {
         var today = BusinessDateService.Current();
         var workshops = await db.Workshops.AsNoTracking().OrderBy(w => w.Name).ToListAsync();
-        // Only the two production lines can be picked; anything else (e.g. an old bookmark) means every line.
-        if (workshopId is int picked && !workshops.Any(w => w.Id == picked && ManpowerManagement.Pages.Admin.LeadersModel.LineNames.Contains(w.Name))) workshopId = null;
+        // An unknown workshop id (e.g. an old bookmark) means every line.
+        if (workshopId is int picked && workshops.All(w => w.Id != picked)) workshopId = null;
 
         var employees = await MonitoredEmployeesAsync(access, workshopId, today);
         var ctx = await BuildContextAsync(employees, today);

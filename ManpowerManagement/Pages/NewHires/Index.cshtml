@@ -4,8 +4,8 @@
 @{
     ViewData["Title"] = "New hire monitoring";
     var data = Model.Data;
-    // Workshops are managed as two lines only; a line covers every workshop under it.
-    var lines = data.Workshops.Where(w => ManpowerManagement.Pages.Admin.LeadersModel.LineNames.Contains(w.Name)).ToList();
+    // Every workshop can be filtered on; picking a parent also covers the workshops under it.
+    var lines = data.Workshops;
     string LineLabel(string name) => name.Replace("Total ", "");
 }
 <div class="workforce-dashboard">
@@ -43,6 +43,10 @@
             <select id="nh-phase" name="phase">
                 @foreach (var (value, label) in ManpowerManagement.Pages.NewHires.IndexModel.PhaseFilters) { <option value="@value" selected="@(Model.Phase == value)">@label</option> }
             </select>
+        </div>
+        <div class="wd-filter-field wd-month">
+            <label for="nh-search">Search</label>
+            <input id="nh-search" type="search" name="q" value="@Model.Q" placeholder="Emp ID or name" />
         </div>
         <button class="wd-apply" type="submit">Apply filters</button>
     </form>
