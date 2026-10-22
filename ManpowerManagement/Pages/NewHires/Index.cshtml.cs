@@ -15,6 +15,7 @@ public class IndexModel(NewHireMonitorService monitor) : PageModel
 
     [BindProperty(SupportsGet = true)] public int? WorkshopId { get; set; }
     [BindProperty(SupportsGet = true)] public string Phase { get; set; } = "all";
+    [BindProperty(SupportsGet = true)] public string? Q { get; set; }
     [TempData] public string? Message { get; set; }
     public NewHireAccess Access { get; private set; } = new();
     public NewHireMonitorService.Monitor Data { get; private set; } = new();
@@ -29,7 +30,7 @@ public class IndexModel(NewHireMonitorService monitor) : PageModel
         return Page();
     }
 
-    bool Matches(NewHireMonitorService.NewHireRow row) => Phase switch
+    bool Matches(NewHireMonitorService.NewHireRow row) => MatchesSearch(row) && Phase switch
     {
         "attention" => row.Phase is NewHirePhase.DecisionSoon or NewHirePhase.DecisionOverdue,
         "risk" => row.AtRisk,
@@ -38,4 +39,7 @@ public class IndexModel(NewHireMonitorService monitor) : PageModel
         "decided" => row.Phase is NewHirePhase.Passed or NewHirePhase.NotPassed,
         _ => true
     };
+
+    bool MatchesSearch(NewHireMonitorService.NewHireRow row) =>
+        string.IsNullOrWhiteSpace(Q) || row.Code.Contains(Q.Trim(), StringComparison.OrdinalIgnoreCase) || row.Name.Contains(Q.Trim(), StringComparison.OrdinalIgnoreCase);
 }
